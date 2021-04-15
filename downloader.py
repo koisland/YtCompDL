@@ -1,3 +1,4 @@
+import os
 import youtube_dl
 
 """
@@ -5,14 +6,25 @@ https://github.com/ytdl-org/youtube-dl/blob/master/README.md#embedding-youtube-d
 Embedding ytdl in python
 """
 
+import logging
+
+logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
+                    format="%(asctime)s - %(levelname)s - %(message)s")
+
 
 class Ydl_Logger(object):
-    # TODO: Work on outputting to yt_data.log
+
+    def error(self, msg):
+        logging.error(msg)
+
     def debug(self, msg):
         print(msg)
+        pass
+        # logging.debug(msg)
 
 
 def ydl_downloader(url, output):
+    dest = os.path.join(os.getcwd(), 'output', '%(title)s.%(ext)s')
     if output == "audio":
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -20,16 +32,21 @@ def ydl_downloader(url, output):
                 'key': 'FFmpegExtractAudio',
                 'preferredcodec': 'mp3',
                 'preferredquality': '192'}],
+            # Output processed file to output folder
+            'outtmpl': dest,
+            'restrictfilenames': True,
             'logger': Ydl_Logger(),
-            'noplaylist': True}
+            # Ignore playlist and just download single video.
+            'noplaylist': True,
+            # Save thumbnail and use.
+            'writethumbnail': True,
+            }
     else:
         ydl_opts = {
-            'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192'
-            }]}
+            'format': 'bestvideo/best',
+            'outtmpl': dest,
+            'logger': Ydl_Logger(),
+            }
 
     # TODO: Track progress of video conversion to audio with ffmpeg.
     #  Might need to use pexpect to spawn child process.

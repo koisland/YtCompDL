@@ -6,6 +6,7 @@ import logging
 from functools import reduce
 from googleapiclient.discovery import build
 from downloader import ydl_downloader
+from youtube_dl.utils import sanitize_filename
 
 """
 General documentation for py
@@ -44,16 +45,19 @@ class YTSingleVideoBreakdown:
         self.video_id = self.extract_id()
 
         self.snippets, self.content_details = list(self.get_video_info('snippet', 'contentDetails'))
-        self.title = self.snippets['title']
+
+        # Use youtube-dl util function "sanitize_filename".
+        self.title = sanitize_filename(self.snippets['title']).replace(" ", "_")
         self.desc = self.snippets['description']
         self.channel = self.snippets['channelTitle']
         self.upload_time = self.snippets['publishedAt']
-        
+
         # datetime.timedelta
         time_pattern = f"PT{self.set_dtime_format('H')}{self.set_dtime_format('M')}{self.set_dtime_format('S')}"
         self.duration = datetime.datetime.strptime(self.content_details['duration'], time_pattern) - self.BASE_TIME
 
         self.timestamp_style = None
+        self.extract_comments(max_comments=1000)
         self.timestamps = self.find_timestamps()
         ydl_downloader(self.video_url, "audio")
 
@@ -86,7 +90,7 @@ class YTSingleVideoBreakdown:
             converted_times.append(datetime.datetime.strptime(str_time, "%H:%M:%S"))
         return converted_times
 
-    def validate_timestamps(self, timestamps, min_num_timestamps=5, percent_threshold=0.90):
+    def validate_timestamps(self, timestamps, min_num_timestamps=5, percent_threshold=0.5):
         # If total number of timestamps below minimum, reject timestamps
         # If total length not within 5% of actual video length, reject timestamps.
 
@@ -116,7 +120,7 @@ class YTSingleVideoBreakdown:
         # As a result, default percent threshold high but not insanely high. Adjust accordingly.
         percent_identity = total_length / self.duration
         if percent_threshold <= percent_identity:
-            return f"Percent similarity: {round(percent_identity * float(100), 2) }%"
+            return f"Percent similarity: {round(percent_identity * float(100), 2)}%"
 
     def get_video_info(self, *parts):
         if self.video_id:
@@ -131,7 +135,7 @@ class YTSingleVideoBreakdown:
             logging.error("Exception occurred", exc_info=True)
             raise Exception("Unable to parse video id from provided url.")
 
-    def find_timestamps(self, select_comment=False, save_timestamps=True):
+    def find_timestamps(self, select_comment=True, save_timestamps=True):
         valid_timestamps = []
         parsed_timestamps = []
 
@@ -146,7 +150,6 @@ class YTSingleVideoBreakdown:
             for comment in self.extract_comments():
                 if comm_timestamps := re.findall(self.YT_DUR_TIMESTAMPS_REGEX, comment) \
                                       or re.findall(self.YT_START_TIMESTAMPS_REGEX, comment):
-
                     # if length of all timestamps is 2, timestamp is based on start of chapter.
                     # if length of all timestamps is 3, timestamp is based on duration of chapter.
                     if all(len(timestamp) == 2 for timestamp in comm_timestamps):
@@ -161,34 +164,38 @@ class YTSingleVideoBreakdown:
                         parsed_timestamps.append(comm_timestamps)
                         logging.info(f"Valid comment timestamps found ({time_perc_identity}).")
 
-            # If select_comment=True, allow to choose which timestamps to select when multiple are valid.
-            # Else, return comment timestamps with highest percentage identity.
-            if select_comment:
-                total_comments = len(valid_timestamps)
-                for num, v_comment in enumerate(valid_timestamps):
-                    print(f"[{num+1}]")
-                    pprint.pprint(v_comment)
+            # If number of valid timestamps is greater than 0.
+            if len(valid_timestamps) > 0:
+                # If select_comment=True, allow to choose which timestamps to select when multiple are valid.
+                # Else, return comment timestamps with highest percentage identity.
+                if select_comment:
+                    total_comments = len(valid_timestamps)
+                    for num, v_comment in enumerate(valid_timestamps):
+                        print(f"[{num + 1}]")
+                        pprint.pprint(v_comment)
 
-                question = input(f"Select comment. (1-{total_comments})\n")
-                while int(question) not in range(1, total_comments+1):
-                    print(f"Invalid comment ({question}). Please try again.\n")
                     question = input(f"Select comment. (1-{total_comments})\n")
+                    while int(question) not in range(1, total_comments + 1):
+                        print(f"Invalid comment ({question}). Please try again.\n")
+                        question = input(f"Select comment. (1-{total_comments})\n")
 
-                logging.info(f"Comment {int(question)} chosen for timestamps.")
-                chosen_comment = valid_timestamps[int(question)-1]
-                chosen_timestamps = parsed_timestamps[int(question)-1]
+                    logging.info(f"Comment {int(question)} chosen for timestamps.")
+                    chosen_comment = valid_timestamps[int(question) - 1]
+                    chosen_timestamps = parsed_timestamps[int(question) - 1]
+                else:
+                    sorted_comments = list(sorted(valid_timestamps, key=lambda x: x[0], reverse=True))
+                    chosen_comment = sorted_comments[0]
+                    # Need original index before sort to get parsed timestamps.
+                    original_index = valid_timestamps.index(chosen_comment)
+                    chosen_timestamps = parsed_timestamps[original_index]
             else:
-                sorted_comments = list(sorted(valid_timestamps, key=lambda x: x[0], reverse=True))
-                chosen_comment = sorted_comments[0]
-                # Need original index before sort to get parsed timestamps.
-                original_index = valid_timestamps.index(chosen_comment)
-                chosen_timestamps = parsed_timestamps[original_index]
+                logging.info(f"No valid timestamps found in comments.")
+                return
 
         # Save timestamps to file named f"{title}_timestamps.txt"
         if save_timestamps:
-            # TODO: Replace title characters not allowed as file.
             try:
-                timestamp_fname = f'{self.title.replace("/", "")}_timestamps.txt'
+                timestamp_fname = f'{self.title}_timestamps.txt'
             except FileNotFoundError:
                 # If invalid characters in title.
                 timestamp_fname = 'video_timestamp.txt'
@@ -198,17 +205,31 @@ class YTSingleVideoBreakdown:
 
         return self.clean_timestamps(chosen_timestamps)
 
-    def extract_comments(self, num=100):
+    def extract_comments(self, max_comments=500):
+        # Comment counter
+        comments_checked = 0
+        # Must be a multiple of 100.
+        if max_comments % 100 != 0:
+            raise Exception("Invalid number of comments to check. Must be a multiple of 100.")
+
         comment_request = self.YT.commentThreads().list(part="snippet, replies", videoId=self.video_id,
-                                                        maxResults=num, order="relevance")
-        comment_response = comment_request.execute()
-        if comment_threads := comment_response.get('items'):
-            logging.info('Comments found.')
-            for thread in comment_threads:
-                top_level_comment = thread['snippet']['topLevelComment']
-                yield top_level_comment['snippet']['textOriginal']
-        else:
-            logging.info("No comments found.")
+                                                        maxResults=100, order="relevance")
+        # Increment for first request.
+        comments_checked += 100
+        while comment_request:
+            comment_response = comment_request.execute()
+            if comment_threads := comment_response.get('items'):
+                logging.info('Comments found.')
+                for thread in comment_threads:
+                    top_level_comment = thread['snippet']['topLevelComment']
+                    yield top_level_comment['snippet']['textOriginal']
+                # list next returns None if no items remaining.
+                comment_request = self.YT.commentThreads().list_next(comment_request, comment_response)
+                comments_checked += 100
+            else:
+                logging.info("No comments found.")
+            if comments_checked == max_comments:
+                comment_request = None
 
     def extract_id(self):
         if id_search := re.search(self.YT_ID_REGEX, self.video_url):
@@ -219,13 +240,13 @@ if __name__ == "__main__":
     """
     Monogatari Soundtrack - Timestamps (start) in desc.
     """
-    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4")
+    test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4")
 
     """
     LOTR Soundtrack - Timestamps (duration) in comment section. 
     """
-    test = YTSingleVideoBreakdown(
-        video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
+    # test = YTSingleVideoBreakdown(
+    #     video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
 
     """
     Animalcule video - No comments.
@@ -234,10 +255,16 @@ if __name__ == "__main__":
 
     """
     BFV Soundtrack - Timestamp (start) in comment section. Some untitled chapters just have new line char.
+    New line breaks regex so formats like:
+        3:12
+        5:15 Song
     """
-    # test = https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3
+    # test = YTSingleVideoBreakdown(
+    #     video_url="https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
 
     """
     Hollow Knight Soundtrack - Timestamp in pinned comment. Surrounded in brackets.
     """
     # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=6")
+
+    # print(test.timestamps)

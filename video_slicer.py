@@ -1,9 +1,28 @@
-# use ffmpeg to segment audio
-# documentation
-# https://www.ffmpeg.org/ffmpeg-formats.html#segment_002c-stream_005fsegment_002c-ssegment
-# https://unix.stackexchange.com/questions/94168/anyone-gotten-the-switch-segment-times-working-with-ffmpeg
+# ffmpeg
+# https://ffmpeg.org/ffmpeg.html#toc-Main-options
 
-# OR
+# Trimming
+# https://unix.stackexchange.com/questions/182602/trim-audio-file-using-start-and-stop-times
 
-# Pydub. Might be better since I can also apply mp3 tags
-# https://github.com/jiaaro/pydub
+# Add tags/metdata
+# https://superuser.com/questions/1331752/ffmpeg-adding-metadata-to-an-mp3-from-mp3-input
+# https://wiki.multimedia.cx/index.php/FFmpeg_Metadata
+# https://stackoverflow.com/questions/18710992/how-to-add-album-art-with-ffmpeg
+
+
+import os
+import subprocess
+
+
+def slice_audio(path):
+    start = 0
+    stop = 60
+    output = "Suruga Kanbaru's Life.mp3"
+    cmd = ['ffmpeg', '-i', f'{path}', '-ss', f'{start}', '-to', f'{stop}', '-c', f'"{output}"']
+    print(' '.join(cmd))
+
+
+if __name__ == "__main__":
+    mp3_path = os.path.join(os.getcwd(), "output", "Monogatari.mp3")
+    print(mp3_path)
+    slice_audio(mp3_path)
