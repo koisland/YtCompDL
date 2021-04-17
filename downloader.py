@@ -48,8 +48,7 @@ def ydl_downloader(url, output):
             'logger': Ydl_Logger(),
             }
 
-    # TODO: Track progress of video conversion to audio with ffmpeg.
-    #  Might need to use pexpect to spawn child process.
-    #  https://stackoverflow.com/questions/7632589/getting-realtime-output-from-ffmpeg-to-be-used-in-progress-bar-pyqt4-stdout#answer-7641175
+    # TODO: Just add hook saying that conversion with ffmpeg occuring.
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
         ydl.download([url])
+        logging.info("Download/conversion finished.")
