@@ -21,6 +21,14 @@ logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
 
 
 def slice_audio(source, output, duration):
+    """
+
+    :param source:
+    :param output:
+    :param duration:
+    :param fade:
+    :return:
+    """
     if not os.path.exists(source) or os.path.exists(output):
         raise Exception("Invalid file.")
     if not isinstance(duration, Collection) and all(isinstance(time, timedelta) for time in duration):
@@ -29,10 +37,19 @@ def slice_audio(source, output, duration):
     source = source.replace("\\", "/")
     output = output.replace("\\", "/")
 
+    # ss arg for position, c for codec/copy
     cmd = ['ffmpeg', '-i', source, '-ss', f'{duration[0]}', '-to', f'{duration[1]}', '-c', 'copy', output]
     logging.info(f"Running following command: {' '.join(cmd)}")
     subprocess.call(cmd)
+    return output
 
+
+def apply_afade(seconds, in_place=True):
+    # https://video.stackexchange.com/questions/19867/how-to-fade-in-out-a-video-audio-clip-with-unknown-duration
+    pass
+
+def apply_metadata():
+    pass
 
 if __name__ == "__main__":
     base_dir = os.path.join(os.getcwd(), "output")

@@ -8,7 +8,9 @@ from googleapiclient.discovery import build
 from youtube_dl.utils import sanitize_filename
 
 from downloader import ydl_downloader
-from video_slicer import slice_audio
+from ffmpeg_utils import slice_audio
+from utils import timer
+
 """
 General documentation for py
 https://github.com/googleapis/google-api-python-client
@@ -50,30 +52,54 @@ class YTSingleVideoBreakdown:
         self.snippets, self.content_details = list(self.get_video_info('snippet', 'contentDetails'))
 
         # Use youtube-dl util function "sanitize_filename".
-        self.title = sanitize_filename(self.snippets['title']).replace(" ", "_")
+        self.title = sanitize_filename(self.snippets['title']).replace("  ", " ").replace(" ", "_")
         self.desc = self.snippets['description']
         self.channel = self.snippets['channelTitle']
         self.upload_time = self.snippets['publishedAt']
 
-        # datetime.timedelta
+        # datetime.timedelta4
         time_pattern = f"PT{self.set_dtime_format('H')}{self.set_dtime_format('M')}{self.set_dtime_format('S')}"
         self.duration = datetime.datetime.strptime(self.content_details['duration'], time_pattern) - self.BASE_TIME
 
         self.timestamp_style = None
         self.extract_comments(max_comments=1000)
         self.timestamps = self.find_timestamps()
+        pprint.pprint(self.timestamps)
         self.titles, self.times = self.format_timestamps()
 
     def download(self, output="audio", slice_output=True):
-        ydl_downloader(self.video_url, output)
+        """
+        Download YT video provided by url and slice into individual videos using timestamps.
+        :param output: audio or video output (string)
+        :param slice_output: slice output using timestamps? (boolean)
+        :return:
+        """
+        download_path = os.path.join(os.getcwd(), 'output')
+        video_path = os.path.join(download_path, f"{self.title}.mp3")
+        if not os.path.exists(video_path):
+            if output.lower() not in ("audio", "video"):
+                raise Exception("Invalid output format.")
+            logging.info(f"Downloading {output.lower()} for {self.snippets['title']}.")
+            ydl_downloader(self.video_url, output)
+        else:
+            logging.info("Pre-existing file found.")
         if slice_output:
             if self.titles and self.times:
-                pass
+                folder_path = os.path.join(download_path, self.title)
+                if not os.path.exists(folder_path):
+                    os.makedirs(folder_path)
+                logging.info(f"Slicing {self.title}...")
+                for title, times in zip(self.titles, self.times):
+                    slice_path = os.path.join(folder_path, f"{title}.mp3")
+                    duration = [time.seconds for time in times]
+                    output = slice_audio(source=video_path, output=slice_path, duration=duration)
+                    # TODO: Fix UnicodeEncodeError
+                    logging.info(f"{title.encode('utf-8')} sliced from {duration[0]} to {duration[1]} seconds.\n"
+                                 f"Destination: {output}")
             else:
                 raise Exception("No timestamps could be parsed.")
         else:
-            pass
-
+            logging.info(f"Unsliced {self.title} saved to {download_path}")
 
     def set_dtime_format(self, char):
         # Sets pattern for converting duration string into datetime.datetime
@@ -86,7 +112,7 @@ class YTSingleVideoBreakdown:
         """
         Format timestamps by splitting into times and titles
         Convert times into durations that can be fed into ffmpeg. Also add ending times.
-        :return: titles, times (lists)
+        :return: titles, times (list)
         """
         titles = []
         times = []
@@ -99,7 +125,7 @@ class YTSingleVideoBreakdown:
 
         # Condense nested lists to single list and convert to duration.
         if self.timestamp_style == "Start":
-            times = reduce(lambda x, y: x+y, times)
+            times = reduce(lambda x, y: x + y, times)
             dur_times = []
             for i in range(len(times) - 1):
                 if i == 0:
@@ -119,17 +145,17 @@ class YTSingleVideoBreakdown:
     def clean_timestamps(timestamps):
         """
         Remove characters used to separate timestamp and title.
-        :param timestamps: list of lists each containing timestamp/title strings
-        :return: list of lists each containing modified timestamp/title strings
+        :param timestamps:  timestamp/title strings (list of lists)
+        :return: modified timestamp/title strings (list of lists)
         """
         return [[re.sub("|\[|]|—|-|~", "", item.strip()).strip() for item in timestamp] for timestamp in timestamps]
 
     def convert_str_time(self, str_times, rtn_fmt="datetime"):
         """
         Convert string time to datetime
-        :param str_times: iterable of time-like strings
-        :param rtn_fmt: string, whether to return datetime or timedelta
-        :return: iterable of datetime objects
+        :param str_times: time-like strings (iterable)
+        :param rtn_fmt: return datetime or timedelta? (string)
+        :return: datetime objects (list)
         """
         # Check if str_times iterable has any invalid dtypes (not a str).
         if any(not isinstance(str_time, str) for str_time in str_times):
@@ -184,6 +210,7 @@ class YTSingleVideoBreakdown:
         if percent_threshold <= percent_identity:
             return f"Percent similarity: {round(percent_identity * float(100), 2)}%"
 
+    @timer
     def get_video_info(self, *parts):
         if self.video_id:
             # query desired parts from video with matching video id.
@@ -197,6 +224,17 @@ class YTSingleVideoBreakdown:
             logging.error("Exception occurred", exc_info=True)
             raise Exception("Unable to parse video id from provided url.")
 
+    def set_timestamp_style(self, timestamps):
+        # if length of all timestamps is 3, timestamp is based on start of chapter.
+        # if length of all timestamps is 4, timestamp is based on duration of chapter.
+        if all(len(timestamp) == 3 for timestamp in timestamps):
+            self.timestamp_style = "Start"
+        elif all(len(timestamp) == 4 for timestamp in timestamps):
+            self.timestamp_style = "Duration"
+        else:
+            logging.error("Invalid format in retrieved timestamps.")
+
+    @timer
     def find_timestamps(self, select_comment=False, save_timestamps=True):
         """
         Found timestamps will always be in this form: (str_title_front, *timestamp, str_title_back)
@@ -215,11 +253,12 @@ class YTSingleVideoBreakdown:
                                  if re.findall(self.YT_START_TIMESTAMPS_REGEX, desc_line)]
 
         if desc_timestamps := desc_dur_timestamps or desc_start_timestamps:
-
             logging.info("Timestamps found in description.")
             chosen_comment = self.desc.split('\n')
             # remove extra list from list comprehension
-            desc_timestamps = reduce(lambda x, y: x+y, desc_timestamps)
+            desc_timestamps = reduce(lambda x, y: x + y, desc_timestamps)
+            # Set timestamp style.
+            self.set_timestamp_style(desc_timestamps)
             chosen_timestamps = self.clean_timestamps(desc_timestamps)
         else:
             # If cannot find timestamps in description, check comments
@@ -234,15 +273,8 @@ class YTSingleVideoBreakdown:
                 # Whichever one isn't an empty list (Not found).
                 if comm_timestamps := comm_dur_timestamps or comm_start_timestamps:
                     comm_timestamps = reduce(lambda x, y: x + y, comm_timestamps)
-                    # if length of all timestamps is 3, timestamp is based on start of chapter.
-                    # if length of all timestamps is 4, timestamp is based on duration of chapter.
-                    if all(len(timestamp) == 3 for timestamp in comm_timestamps):
-                        self.timestamp_style = "Start"
-                    elif all(len(timestamp) == 4 for timestamp in comm_timestamps):
-                        self.timestamp_style = "Duration"
-                    else:
-                        logging.error("Invalid format in retrieved timestamps.")
-
+                    # Set timestamp style.
+                    self.set_timestamp_style(comm_timestamps)
                     if time_perc_identity := self.validate_timestamps(comm_timestamps):
                         valid_timestamps.append([time_perc_identity, *comment])
                         parsed_timestamps.append(comm_timestamps)
@@ -289,6 +321,7 @@ class YTSingleVideoBreakdown:
 
         return self.clean_timestamps(chosen_timestamps)
 
+    @timer
     def extract_comments(self, max_comments=500):
         # Comment counter
         comments_checked = 0
@@ -324,13 +357,15 @@ if __name__ == "__main__":
     """
     Monogatari Soundtrack - Timestamps (start) in desc.
     """
-    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4")
+    test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4")
+    test.download(output="audio", slice_output=True)
 
     """
     LOTR Soundtrack - Timestamps (duration) in comment section. 
     """
-    test = YTSingleVideoBreakdown(
-        video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
+    # test = YTSingleVideoBreakdown(
+    #     video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
+    # test.download(output="audio", slice_output=True)
 
     """
     Animalcule video - No comments.

@@ -1,12 +1,12 @@
 import os
 import youtube_dl
+import logging
+from utils import timer
 
 """
 https://github.com/ytdl-org/youtube-dl/blob/master/README.md#embedding-youtube-dl
 Embedding ytdl in python
 """
-
-import logging
 
 logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
@@ -23,6 +23,7 @@ class Ydl_Logger(object):
         # logging.debug(msg)
 
 
+@timer
 def ydl_downloader(url, output):
     dest = os.path.join(os.getcwd(), 'output', '%(title)s.%(ext)s')
     if output == "audio":
@@ -40,13 +41,13 @@ def ydl_downloader(url, output):
             'noplaylist': True,
             # Save thumbnail and use.
             'writethumbnail': True,
-            }
+        }
     else:
         ydl_opts = {
             'format': 'bestvideo/best',
             'outtmpl': dest,
             'logger': Ydl_Logger(),
-            }
+        }
 
     # TODO: Just add hook saying that conversion with ffmpeg occuring.
     with youtube_dl.YoutubeDL(ydl_opts) as ydl:
