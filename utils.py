@@ -11,7 +11,7 @@ def timer(func):
         result = func(*args, **kwargs)
         end_time = timeit.default_timer()
         elapsed_time = end_time - start_time
-        logging.debug(f"Total time elapsed for {func.__name__} is {elapsed_time}.")
+        logging.debug(f"Total time elapsed for {func.__name__} is {round(elapsed_time, 3)} seconds.")
         return result
 
     return timed_func

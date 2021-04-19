@@ -8,7 +8,7 @@ from googleapiclient.discovery import build
 from youtube_dl.utils import sanitize_filename
 
 from downloader import ydl_downloader
-from ffmpeg_utils import slice_audio
+from ffmpeg_utils import slice_audio, apply_afade, apply_metadata
 from utils import timer
 
 """
@@ -46,7 +46,14 @@ class YTSingleVideoBreakdown:
 
     BASE_TIME = datetime.datetime.strptime("1900-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
 
-    def __init__(self, video_url):
+    ACCEPTED_TAGS = ("album", "composer", "genre", "artist", "album_artist", "date")
+
+    def __init__(self, video_url, metadata=None):
+        """
+        :param video_url: Youtube video url. (string)
+        :param album_metadata: Optional album metadata (dict)
+        Titles and track numbers applied by default.
+        """
         self.video_url = video_url
         self.video_id = self.extract_id()
         self.snippets, self.content_details = list(self.get_video_info('snippet', 'contentDetails'))
@@ -56,6 +63,8 @@ class YTSingleVideoBreakdown:
         self.desc = self.snippets['description']
         self.channel = self.snippets['channelTitle']
         self.upload_time = self.snippets['publishedAt']
+        self.year_uploaded = self.upload_time.split('-')[0]
+        self.metadata = self.set_metadata(metadata)
 
         # datetime.timedelta4
         time_pattern = f"PT{self.set_dtime_format('H')}{self.set_dtime_format('M')}{self.set_dtime_format('S')}"
@@ -63,19 +72,40 @@ class YTSingleVideoBreakdown:
 
         self.timestamp_style = None
         self.extract_comments(max_comments=1000)
-        self.timestamps = self.find_timestamps()
+        self.timestamps = self.find_timestamps(select_comment=True, save_timestamps=True)
         pprint.pprint(self.timestamps)
         self.titles, self.times = self.format_timestamps()
 
-    def download(self, output="audio", slice_output=True):
+    def set_metadata(self, metadata):
+        if metadata is None:
+            metadata = {'album': self.snippets['title'],
+                        'album_artist': self.channel,
+                        'year': self.year_uploaded}
+            logging.info(f"No optional album metadata provided. Applying defaults.\n"
+                         f"{metadata.items()}")
+            return metadata
+        else:
+            if metadata and \
+                    isinstance(metadata, dict) and \
+                    all(tag in self.ACCEPTED_TAGS for tag, _ in metadata.items()):
+                logging.info("Valid album metadata provided.")
+                return metadata
+            else:
+                raise Exception("Invalid album metadata provided.")
+
+    def download(self, output="audio", slice_output=True, apply_fade="both", fade_time=0.5):
         """
         Download YT video provided by url and slice into individual videos using timestamps.
         :param output: audio or video output (string)
         :param slice_output: slice output using timestamps? (boolean)
+        :param apply_fade:
+        :param fade_time:
         :return:
         """
         download_path = os.path.join(os.getcwd(), 'output')
         video_path = os.path.join(download_path, f"{self.title}.mp3")
+        thumbnail_path = os.path.join(download_path, f"{self.title}.jpg")
+
         if not os.path.exists(video_path):
             if output.lower() not in ("audio", "video"):
                 raise Exception("Invalid output format.")
@@ -88,14 +118,28 @@ class YTSingleVideoBreakdown:
                 folder_path = os.path.join(download_path, self.title)
                 if not os.path.exists(folder_path):
                     os.makedirs(folder_path)
+
                 logging.info(f"Slicing {self.title}...")
-                for title, times in zip(self.titles, self.times):
-                    slice_path = os.path.join(folder_path, f"{title}.mp3")
+                for num, (title, times) in enumerate(zip(self.titles, self.times), 1):
                     duration = [time.seconds for time in times]
-                    output = slice_audio(source=video_path, output=slice_path, duration=duration)
-                    # TODO: Fix UnicodeEncodeError
-                    logging.info(f"{title.encode('utf-8')} sliced from {duration[0]} to {duration[1]} seconds.\n"
-                                 f"Destination: {output}")
+
+                    s_path = os.path.join(folder_path, f"x{title}.mp3")
+                    f_path = os.path.join(folder_path, f"xx{title}.mp3")
+                    final_output = os.path.join(folder_path, f"{title}.mp3")
+
+                    slice_audio(source=video_path, output=s_path, duration=duration)
+                    if apply_fade:
+                        logging.info(f"Applying fade ({apply_fade})")
+                        apply_afade(source=s_path, output=f_path, in_out=apply_fade, seconds=fade_time)
+                    # can't add metadata inplace
+                    apply_metadata(source=f_path,
+                                   output=final_output,
+                                   title=title,
+                                   track=num,
+                                   album_tags=self.metadata,
+                                   cover=thumbnail_path)
+
+                    logging.info(f"{title.encode('utf-8')} sliced from {duration[0]} to {duration[1]} seconds.\n")
             else:
                 raise Exception("No timestamps could be parsed.")
         else:
@@ -310,11 +354,12 @@ class YTSingleVideoBreakdown:
 
         # Save timestamps to file named f"{title}_timestamps.txt"
         if save_timestamps:
+            output_path = os.path.join(os.getcwd(), 'output')
             try:
-                timestamp_fname = f'{self.title}_timestamps.txt'
+                timestamp_fname = os.path.join(output_path, f'{self.title}_timestamps.txt')
             except FileNotFoundError:
                 # If invalid characters in title.
-                timestamp_fname = 'video_timestamp.txt'
+                timestamp_fname = os.path.join(output_path, f'video_timestamp_{datetime.datetime.now()}.txt')
             with open(timestamp_fname, 'w', encoding='utf-8') as fobj:
                 fobj.write('\n'.join(chosen_comment))
             logging.info(f"Timestamps saved to {os.path.join(os.getcwd(), timestamp_fname)}.")
@@ -357,15 +402,13 @@ if __name__ == "__main__":
     """
     Monogatari Soundtrack - Timestamps (start) in desc.
     """
-    test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4")
-    test.download(output="audio", slice_output=True)
+    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4")
 
     """
     LOTR Soundtrack - Timestamps (duration) in comment section. 
     """
     # test = YTSingleVideoBreakdown(
     #     video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
-    # test.download(output="audio", slice_output=True)
 
     """
     Animalcule video - No comments.
@@ -375,8 +418,8 @@ if __name__ == "__main__":
     """
     BFV Soundtrack - Timestamp (start) in comment section. Some untitled chapters just have new line char.
     """
-    # test = YTSingleVideoBreakdown(
-    #     video_url="https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
+    test = YTSingleVideoBreakdown(
+        video_url="https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
 
     """
     Hollow Knight Soundtrack - Timestamp in pinned comment. Surrounded in brackets.
@@ -389,4 +432,5 @@ if __name__ == "__main__":
     """
     # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=fvKGHjpsp-g")
     # test2 = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=waxQzdbixLk")
-    # print(test2.timestamps)
+
+    test.download(output="audio", slice_output=True, apply_fade="both", fade_time=0.5)
