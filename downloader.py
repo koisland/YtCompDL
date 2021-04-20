@@ -28,25 +28,28 @@ def ydl_downloader(url, output):
     dest = os.path.join(os.getcwd(), 'output', '%(title)s.%(ext)s')
     if output == "audio":
         ydl_opts = {
+            # Save thumbnail and embed into output.
+            'writethumbnail': True,
             'format': 'bestaudio/best',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192'}],
+            'postprocessors': [
+                {'key': 'FFmpegExtractAudio',
+                 'preferredcodec': 'mp3',
+                 'preferredquality': '192'},
+                {'key': 'EmbedThumbnail'}],
             # Output processed file to output folder
             'outtmpl': dest,
             'restrictfilenames': True,
             'logger': Ydl_Logger(),
             # Ignore playlist and just download single video.
-            'noplaylist': True,
-            # Save thumbnail and use.
-            'writethumbnail': True,
+            'noplaylist': True
         }
     else:
         ydl_opts = {
             'format': 'bestvideo/best',
             'outtmpl': dest,
+            'restrictfilenames': True,
             'logger': Ydl_Logger(),
+            'noplaylist': True,
         }
 
     # TODO: Just add hook saying that conversion with ffmpeg occuring.

@@ -42,9 +42,12 @@ def slice_audio(source, output, duration):
     output = shlex.quote(output)
 
     # ss arg for position, c for codec/copy
+    # -map_metadata 0 copy metadata from source to output
     cmd = ['ffmpeg', '-i', *shlex.split(source),
+           '-map_metadata', '0',
            '-ss', f'{duration[0]}', '-to', f'{duration[1]}',
-           '-c', 'copy', *shlex.split(output)]
+           '-c', 'copy',
+           *shlex.split(output)]
 
     logging.debug(f"Running slice command: {' '.join(cmd)}")
     subprocess.call(cmd, shell=False)
@@ -79,7 +82,10 @@ def apply_afade(source, output, in_out="both", seconds=1):
         "both": ['-filter_complex', f'afade=d={seconds}, areverse, afade=d={seconds}, areverse']
     }
 
-    cmd = ['ffmpeg', '-i', *shlex.split(source), *afade_cmds[in_out.lower()], *shlex.split(output)]
+    cmd = ['ffmpeg', '-i', *shlex.split(source),
+           '-map_metadata', '0',
+           *afade_cmds[in_out.lower()],
+           *shlex.split(output)]
     logging.debug(f"Running fade command: {' '.join(cmd)}")
     subprocess.call(cmd, shell=False)
 
@@ -90,7 +96,7 @@ def apply_afade(source, output, in_out="both", seconds=1):
 
 
 @timer
-def apply_metadata(source, output, title, track, album_tags, cover=None):
+def apply_metadata(source, output, title, track, album_tags):
     # source file to remove after metadata is applied.
     src_file = source
     source = shlex.quote(source)
@@ -104,7 +110,9 @@ def apply_metadata(source, output, title, track, album_tags, cover=None):
         metadata_args.append(f'-metadata')
         metadata_args.append(tag_str)
 
-    cmd = [f'ffmpeg', '-i', *shlex.split(source), '-c', 'copy',
+    cmd = [f'ffmpeg', '-i', *shlex.split(source),
+           '-map_metadata', '0',
+           '-c', 'copy',
            f'-metadata', f'title={title}', f'-metadata', f'track={str(track)}',
            *metadata_args, *shlex.split(output)]
 

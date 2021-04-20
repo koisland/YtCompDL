@@ -73,8 +73,11 @@ class YTSingleVideoBreakdown:
         self.timestamp_style = None
         self.extract_comments(max_comments=1000)
         self.timestamps = self.find_timestamps(select_comment=True, save_timestamps=True)
-        pprint.pprint(self.timestamps)
-        self.titles, self.times = self.format_timestamps()
+
+        if self.timestamps is not None:
+            self.titles, self.times = self.format_timestamps()
+        else:
+            self.titles, self.times = None, None
 
     def set_metadata(self, metadata):
         if metadata is None:
@@ -104,7 +107,10 @@ class YTSingleVideoBreakdown:
         """
         download_path = os.path.join(os.getcwd(), 'output')
         video_path = os.path.join(download_path, f"{self.title}.mp3")
-        thumbnail_path = os.path.join(download_path, f"{self.title}.jpg")
+
+        # # Convert thumbnail to jpg to avoid any ffmpeg issues.
+        # thumbnail_path = os.path.join(download_path, f"{self.title}.jpg")
+        #
 
         if not os.path.exists(video_path):
             if output.lower() not in ("audio", "video"):
@@ -136,12 +142,11 @@ class YTSingleVideoBreakdown:
                                    output=final_output,
                                    title=title,
                                    track=num,
-                                   album_tags=self.metadata,
-                                   cover=thumbnail_path)
+                                   album_tags=self.metadata)
 
                     logging.info(f"{title.encode('utf-8')} sliced from {duration[0]} to {duration[1]} seconds.\n")
             else:
-                raise Exception("No timestamps could be parsed.")
+                raise Exception("No timestamps to use to slice.")
         else:
             logging.info(f"Unsliced {self.title} saved to {download_path}")
 
@@ -407,8 +412,8 @@ if __name__ == "__main__":
     """
     LOTR Soundtrack - Timestamps (duration) in comment section. 
     """
-    # test = YTSingleVideoBreakdown(
-    #     video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
+    test = YTSingleVideoBreakdown(
+        video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
 
     """
     Animalcule video - No comments.
@@ -418,8 +423,8 @@ if __name__ == "__main__":
     """
     BFV Soundtrack - Timestamp (start) in comment section. Some untitled chapters just have new line char.
     """
-    test = YTSingleVideoBreakdown(
-        video_url="https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
+    # test = YTSingleVideoBreakdown(
+    #     video_url="https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
 
     """
     Hollow Knight Soundtrack - Timestamp in pinned comment. Surrounded in brackets.
@@ -433,4 +438,10 @@ if __name__ == "__main__":
     # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=fvKGHjpsp-g")
     # test2 = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=waxQzdbixLk")
 
+    """
+    Contradiction Soundtrack
+    """
+    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4")
+
+    # Start download
     test.download(output="audio", slice_output=True, apply_fade="both", fade_time=0.5)
