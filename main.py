@@ -4,32 +4,22 @@ import datetime
 import pprint
 import logging
 from functools import reduce
-from googleapiclient.discovery import build
-from youtube_dl.utils import sanitize_filename
 
-from downloader import ydl_downloader
+from dotenv import load_dotenv
+from argparse import ArgumentParser
+from googleapiclient.discovery import build
+from pytube.helpers import safe_filename
+
+# local imports
+from downloader import Pytube_Dl
 from ffmpeg_utils import slice_audio, apply_afade, apply_metadata
 from utils import timer
 
-"""
-General documentation for py
-https://github.com/googleapis/google-api-python-client
-"""
-
-"""
-YT py methods page
-https://googleapis.github.io/google-api-python-client/docs/dyn/youtube_v3.html
-"""
-
-"""
-General yt documentation
-https://developers.google.com/youtube/v3/docs
-"""
 logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-class YTSingleVideoBreakdown:
+class YTSingleVideoBreakdown(Pytube_Dl):
     # Setup build func to allow access to Youtube API.
     YT = build(serviceName="youtube", version="v3", developerKey=os.environ.get("YT_API_KEY"))
 
@@ -48,18 +38,20 @@ class YTSingleVideoBreakdown:
 
     ACCEPTED_TAGS = ("album", "composer", "genre", "artist", "album_artist", "date")
 
-    def __init__(self, video_url, metadata=None):
+    def __init__(self, video_url, output, metadata=None):
         """
         :param video_url: Youtube video url. (string)
         :param album_metadata: Optional album metadata (dict)
         Titles and track numbers applied by default.
         """
+        super().__init__(video_url, output)
         self.video_url = video_url
+        self.output = output
         self.video_id = self.extract_id()
         self.snippets, self.content_details = list(self.get_video_info('snippet', 'contentDetails'))
 
-        # Use youtube-dl util function "sanitize_filename".
-        self.title = sanitize_filename(self.snippets['title']).replace("  ", " ").replace(" ", "_")
+        # Use pytube helper function "safe_filename". No spaces, &, etc.
+        self.title = safe_filename(self.snippets['title'])
         self.desc = self.snippets['description']
         self.channel = self.snippets['channelTitle']
         self.upload_time = self.snippets['publishedAt']
@@ -96,10 +88,10 @@ class YTSingleVideoBreakdown:
             else:
                 raise Exception("Invalid album metadata provided.")
 
-    def download(self, output="audio", slice_output=True, apply_fade="both", fade_time=0.5):
+    @timer
+    def download(self, slice_output=True, apply_fade="both", fade_time=0.5):
         """
         Download YT video provided by url and slice into individual videos using timestamps.
-        :param output: audio or video output (string)
         :param slice_output: slice output using timestamps? (boolean)
         :param apply_fade:
         :param fade_time:
@@ -108,35 +100,38 @@ class YTSingleVideoBreakdown:
         download_path = os.path.join(os.getcwd(), 'output')
         video_path = os.path.join(download_path, f"{self.title}.mp3")
 
-        # # Convert thumbnail to jpg to avoid any ffmpeg issues.
-        # thumbnail_path = os.path.join(download_path, f"{self.title}.jpg")
-        #
-
         if not os.path.exists(video_path):
-            if output.lower() not in ("audio", "video"):
-                raise Exception("Invalid output format.")
-            logging.info(f"Downloading {output.lower()} for {self.snippets['title']}.")
-            ydl_downloader(self.video_url, output)
+            logging.info(f"Downloading {self.output.lower()} for {self.snippets['title']}.")
+            self.start_dl()
         else:
             logging.info("Pre-existing file found.")
         if slice_output:
+            # Move to downloader section.
             if self.titles and self.times:
                 folder_path = os.path.join(download_path, self.title)
                 if not os.path.exists(folder_path):
                     os.makedirs(folder_path)
 
                 logging.info(f"Slicing {self.title}...")
+                logging.info(f"Applying fade ({apply_fade})\n")
                 for num, (title, times) in enumerate(zip(self.titles, self.times), 1):
                     duration = [time.seconds for time in times]
 
+                    # if empty title or unknown, give generic name.
+                    # else clean and format.
+                    if title in ("", "?"):
+                        title = f"track_{num}"
+                    else:
+                        title = safe_filename(title)
                     s_path = os.path.join(folder_path, f"x{title}.mp3")
                     f_path = os.path.join(folder_path, f"xx{title}.mp3")
                     final_output = os.path.join(folder_path, f"{title}.mp3")
 
                     slice_audio(source=video_path, output=s_path, duration=duration)
                     if apply_fade:
-                        logging.info(f"Applying fade ({apply_fade})")
-                        apply_afade(source=s_path, output=f_path, in_out=apply_fade, seconds=fade_time)
+                        apply_afade(source=s_path, output=f_path, in_out=apply_fade, duration=times, seconds=fade_time)
+                    else:
+                        f_path = s_path
                     # can't add metadata inplace
                     apply_metadata(source=f_path,
                                    output=final_output,
@@ -165,12 +160,19 @@ class YTSingleVideoBreakdown:
         """
         titles = []
         times = []
+
         for timestamp in self.timestamps:
             times.append(self.convert_str_time(timestamp[1:-1], rtn_fmt="timedelta"))
-            if timestamp.index('') == 0:
+            try:
+                # If empty group is at start. Timestamp title at end.
+                if timestamp.index('') == 0:
+                    titles.append(timestamp[-1])
+                # if empty group of regex at end. Timestamp title at start.
+                elif timestamp.index('') == len(timestamp) - 1:
+                    titles.append(timestamp[0])
+            except ValueError:
+                # if text on both sides of timestamps, take the group on the right by default.
                 titles.append(timestamp[-1])
-            elif timestamp.index('') == -1:
-                titles.append(timestamp[0])
 
         # Condense nested lists to single list and convert to duration.
         if self.timestamp_style == "Start":
@@ -187,7 +189,7 @@ class YTSingleVideoBreakdown:
             times = dur_times
         else:
             # Take last duration timestamp's ending time and add 1 second.
-            times.append([times[-1][1] + 1, self.duration])
+            times.append([times[-1][1] + datetime.timedelta(seconds=1), self.duration])
         return titles, times
 
     @staticmethod
@@ -197,6 +199,7 @@ class YTSingleVideoBreakdown:
         :param timestamps:  timestamp/title strings (list of lists)
         :return: modified timestamp/title strings (list of lists)
         """
+        pprint.pprint(timestamps)
         return [[re.sub("|\[|]|—|-|~", "", item.strip()).strip() for item in timestamp] for timestamp in timestamps]
 
     def convert_str_time(self, str_times, rtn_fmt="datetime"):
@@ -249,7 +252,7 @@ class YTSingleVideoBreakdown:
         total_length = reduce(lambda x, y: x + y, dt_lengths)
 
         # If estimated length is under percent threshold, reject timestamp.
-        # Main issue is that with start timestamps, last item will not be counted.
+        # Main issue is that with start timestamps, last item will not be counted and less accurate in general.
         # If it covers a long segment of the video, could throw off calculation.
         # For duration timestamps, regex pattern won't count anything other than a time-like pattern.
         # So no "END" or "FIN". Not worth risk of matching track title.
@@ -313,8 +316,9 @@ class YTSingleVideoBreakdown:
             # If cannot find timestamps in description, check comments
             logging.info("Timestamps not found in description. Checking comment section.")
             for comment in self.extract_comments():
+                # Replace '"' with '' to help extract titles
                 # Split comment into lines to avoid bad regex matches at end.
-                comment = comment.split('\n')
+                comment = comment.replace('"', '').split('\n')
                 comm_dur_timestamps = [re.findall(self.YT_DUR_TIMESTAMPS_REGEX, cmt_line) for cmt_line in comment
                                        if re.findall(self.YT_DUR_TIMESTAMPS_REGEX, cmt_line)]
                 comm_start_timestamps = [re.findall(self.YT_START_TIMESTAMPS_REGEX, cmt_line) for cmt_line in comment
@@ -323,6 +327,7 @@ class YTSingleVideoBreakdown:
                 if comm_timestamps := comm_dur_timestamps or comm_start_timestamps:
                     comm_timestamps = reduce(lambda x, y: x + y, comm_timestamps)
                     # Set timestamp style.
+
                     self.set_timestamp_style(comm_timestamps)
                     if time_perc_identity := self.validate_timestamps(comm_timestamps):
                         valid_timestamps.append([time_perc_identity, *comment])
@@ -353,6 +358,7 @@ class YTSingleVideoBreakdown:
                     # Need original index before sort to get parsed timestamps.
                     original_index = valid_timestamps.index(chosen_comment)
                     chosen_timestamps = parsed_timestamps[original_index]
+                self.set_timestamp_style(chosen_timestamps)
             else:
                 logging.info(f"No valid timestamps found in comments.")
                 return
@@ -412,8 +418,8 @@ if __name__ == "__main__":
     """
     LOTR Soundtrack - Timestamps (duration) in comment section. 
     """
-    test = YTSingleVideoBreakdown(
-        video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
+    # test = YTSingleVideoBreakdown(
+    #     video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
 
     """
     Animalcule video - No comments.
@@ -429,14 +435,14 @@ if __name__ == "__main__":
     """
     Hollow Knight Soundtrack - Timestamp in pinned comment. Surrounded in brackets.
     """
-    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=6")
+    test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=6",
+                                  output="audio")
 
     """
     Chrono Trigger Soundtrack
     Title is first, timestamps are second.
     """
-    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=fvKGHjpsp-g")
-    # test2 = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=waxQzdbixLk")
+    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=waxQzdbixLk")
 
     """
     Contradiction Soundtrack
@@ -444,4 +450,4 @@ if __name__ == "__main__":
     # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4")
 
     # Start download
-    test.download(output="audio", slice_output=True, apply_fade="both", fade_time=0.5)
+    test.download(slice_output=True, apply_fade="both", fade_time=0.5)

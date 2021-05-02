@@ -43,7 +43,8 @@ def slice_audio(source, output, duration):
 
     # ss arg for position, c for codec/copy
     # -map_metadata 0 copy metadata from source to output
-    cmd = ['ffmpeg', '-i', *shlex.split(source),
+    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
+           '-i', *shlex.split(source),
            '-map_metadata', '0',
            '-ss', f'{duration[0]}', '-to', f'{duration[1]}',
            '-c', 'copy',
@@ -54,12 +55,13 @@ def slice_audio(source, output, duration):
 
 
 @timer
-def apply_afade(source, output, in_out="both", seconds=1):
+def apply_afade(source, output, in_out="both", duration=None, seconds=1):
     """
     Apply audio fade to one or both ends of source audio for some number of seconds.
     :param source:
     :param output:
     :param in_out:
+    :param duration:
     :param seconds:
     :return:
     """
@@ -67,8 +69,14 @@ def apply_afade(source, output, in_out="both", seconds=1):
     source = shlex.quote(source)
     output = shlex.quote(output)
 
+    if duration is None:
+        raise Exception("No track duration given.")
+    else:
+        track_time = duration[1] - duration[0]
+        if seconds > track_time.seconds:
+            raise Exception("Invalid fade time. Longer than track length.")
     if not (isinstance(seconds, int) or isinstance(seconds, float)):
-        raise Exception("Invalid fade time.")
+        raise Exception("Invalid fade time. Not a number.")
     if in_out.lower() not in ("in", "out", "both"):
         raise Exception("Invalid fade option.")
 
@@ -76,15 +84,30 @@ def apply_afade(source, output, in_out="both", seconds=1):
     # afade adds fade for d seconds at start of source
     # areverse reverses audio source
     # This way, we don't have to know how long the track is and specify specific times using ffmpeg's fade func.
+
     afade_cmds = {
-        "in": ['-filter_complex', f'afade=d={seconds}'],
-        "out": ['-filter_complex', f'areverse, afade=d={seconds}, areverse'],
-        "both": ['-filter_complex', f'afade=d={seconds}, areverse, afade=d={seconds}, areverse']
+        "in": [f'afade=d={seconds}'],
+        "out": [f'areverse, afade=d={seconds}, areverse'],
+        "both": [f'afade=d={seconds}, areverse, afade=d={seconds}, areverse']
     }
 
-    cmd = ['ffmpeg', '-i', *shlex.split(source),
+    # https://stackoverflow.com/questions/43818892/fade-out-video-audio-with-ffmpeg
+    fade_cmds = {
+        "in": [],
+        "out": [],
+        "both": []
+    }
+    # afade_cmds = {
+    #     "in": [f'afade=in:st=0:d={seconds}'],
+    #     "out": [f'afade=out:st=0:d={seconds}'],
+    #     "both": [f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}']
+    # }
+
+    # TODO: Recheck afade in.
+    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
+           '-i', *shlex.split(source),
            '-map_metadata', '0',
-           *afade_cmds[in_out.lower()],
+           '-filter_complex', *afade_cmds[in_out.lower()],
            *shlex.split(output)]
     logging.debug(f"Running fade command: {' '.join(cmd)}")
     subprocess.call(cmd, shell=False)
@@ -110,9 +133,11 @@ def apply_metadata(source, output, title, track, album_tags):
         metadata_args.append(f'-metadata')
         metadata_args.append(tag_str)
 
-    cmd = [f'ffmpeg', '-i', *shlex.split(source),
+    cmd = [f'ffmpeg', '-hide_banner', '-loglevel', 'error',
+           '-i', *shlex.split(source),
            '-map_metadata', '0',
            '-c', 'copy',
+           # if title is blank give just generic title
            f'-metadata', f'title={title}', f'-metadata', f'track={str(track)}',
            *metadata_args, *shlex.split(output)]
 
@@ -122,6 +147,31 @@ def apply_metadata(source, output, title, track, album_tags):
     # remove source file
     try:
         os.remove(src_file)
+    except OSError as e:
+        logging.error(e)
+
+
+def merge_codecs(audio, video, output_fname):
+    audio_src = audio
+    video_src = video
+
+    audio = shlex.quote(audio)
+    video = shlex.quote(video)
+    output_fname = shlex.quote(output_fname)
+
+    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
+           '-i', *shlex.split(audio),
+           '-i', *shlex.split(video),
+           '-c:a', 'aac',
+           '-c:v', 'copy',
+           *shlex.split(output_fname)]
+
+    logging.debug(f"Running codec merge command: {' '.join(cmd)}")
+    subprocess.call(cmd, shell=False)
+
+    try:
+        os.remove(audio_src)
+        os.remove(video_src)
     except OSError as e:
         logging.error(e)
 
