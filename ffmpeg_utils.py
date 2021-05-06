@@ -1,15 +1,3 @@
-# ffmpeg
-# https://ffmpeg.org/ffmpeg.html#toc-Main-options
-
-# Trimming
-# https://unix.stackexchange.com/questions/182602/trim-audio-file-using-start-and-stop-times
-
-# Add tags/metdata
-# https://superuser.com/questions/1331752/ffmpeg-adding-metadata-to-an-mp3-from-mp3-input
-# https://wiki.multimedia.cx/index.php/FFmpeg_Metadata
-# https://stackoverflow.com/questions/18710992/how-to-add-album-art-with-ffmpeg
-
-
 import os
 import shlex
 import subprocess
@@ -18,6 +6,7 @@ from datetime import timedelta
 from collections.abc import Collection
 
 from utils import timer
+from errors import PostProcessError
 
 logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
@@ -33,10 +22,10 @@ def slice_audio(source, output, duration):
     :param duration:
     :return:
     """
-    # if not os.path.exists(source) or os.path.exists(output):
-    #     raise Exception("Invalid file.")
+    if not os.path.exists(source) or os.path.exists(output):
+        raise PostProcessError("Invalid file source or output.")
     if not isinstance(duration, Collection) and all(isinstance(time, timedelta) for time in duration):
-        raise Exception("Not an iterable")
+        raise PostProcessError("Invalid duration times.")
 
     source = shlex.quote(source)
     output = shlex.quote(output)
@@ -49,8 +38,12 @@ def slice_audio(source, output, duration):
            '-ss', f'{duration[0]}', '-to', f'{duration[1]}',
            '-c', 'copy',
            *shlex.split(output)]
+    try:
+        logging.debug(f"Running slice command: {' '.join(cmd)}")
+    except UnicodeError:
+        # if contains characters that can't be encoded.
+        pass
 
-    logging.debug(f"Running slice command: {' '.join(cmd)}")
     subprocess.call(cmd, shell=False)
 
 
@@ -70,38 +63,38 @@ def apply_afade(source, output, in_out="both", duration=None, seconds=1):
     output = shlex.quote(output)
 
     if duration is None:
-        raise Exception("No track duration given.")
+        raise PostProcessError("No track duration given.")
     else:
         track_time = duration[1] - duration[0]
         if seconds > track_time.seconds:
-            raise Exception("Invalid fade time. Longer than track length.")
+            raise PostProcessError(f"Invalid fade time. Longer than track length. ({seconds} > {track_time.seconds})")
     if not (isinstance(seconds, int) or isinstance(seconds, float)):
-        raise Exception("Invalid fade time. Not a number.")
+        raise PostProcessError(f"Invalid fade time. Not a number. ({seconds}:{type(seconds)})")
     if in_out.lower() not in ("in", "out", "both"):
-        raise Exception("Invalid fade option.")
+        raise PostProcessError(f"Invalid fade option. ({in_out})")
 
     # https://video.stackexchange.com/questions/19867/how-to-fade-in-out-a-video-audio-clip-with-unknown-duration
     # afade adds fade for d seconds at start of source
     # areverse reverses audio source
     # This way, we don't have to know how long the track is and specify specific times using ffmpeg's fade func.
 
-    afade_cmds = {
-        "in": [f'afade=d={seconds}'],
-        "out": [f'areverse, afade=d={seconds}, areverse'],
-        "both": [f'afade=d={seconds}, areverse, afade=d={seconds}, areverse']
-    }
+    # afade_cmds = {
+    #     "in": [f'afade=d={seconds}'],
+    #     "out": [f'areverse, afade=d={seconds}, areverse'],
+    #     "both": [f'afade=d={seconds}, areverse, afade=d={seconds}, areverse']
+    # }
 
     # https://stackoverflow.com/questions/43818892/fade-out-video-audio-with-ffmpeg
-    fade_cmds = {
+    vfade_cmds = {
         "in": [],
         "out": [],
         "both": []
     }
-    # afade_cmds = {
-    #     "in": [f'afade=in:st=0:d={seconds}'],
-    #     "out": [f'afade=out:st=0:d={seconds}'],
-    #     "both": [f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}']
-    # }
+    afade_cmds = {
+        "in": [f'afade=in:st=0:d={seconds}'],
+        "out": [f'afade=out:st=0:d={seconds}'],
+        "both": [f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}']
+    }
 
     # TODO: Recheck afade in.
     cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
@@ -109,13 +102,17 @@ def apply_afade(source, output, in_out="both", duration=None, seconds=1):
            '-map_metadata', '0',
            '-filter_complex', *afade_cmds[in_out.lower()],
            *shlex.split(output)]
-    logging.debug(f"Running fade command: {' '.join(cmd)}")
+
     subprocess.call(cmd, shell=False)
 
     try:
         os.remove(src_file)
+        logging.debug(f"Removed {src_file}")
+        logging.debug(f"Completed fade command: {' '.join(cmd)}")
     except OSError as e:
         logging.error(e)
+    except UnicodeError:
+        logging.debug(f"Sliced source from {duration[0]}-{duration[1]}")
 
 
 @timer
@@ -141,16 +138,44 @@ def apply_metadata(source, output, title, track, album_tags):
            f'-metadata', f'title={title}', f'-metadata', f'track={str(track)}',
            *metadata_args, *shlex.split(output)]
 
-    logging.debug(f"Running metadata command: {' '.join(cmd)}")
     subprocess.call(cmd, shell=False)
 
     # remove source file
     try:
+
         os.remove(src_file)
+        logging.debug(f"Removed {src_file}")
+        logging.debug(f"Completed metadata command: {' '.join(cmd)}")
     except OSError as e:
         logging.error(e)
+    except UnicodeError:
+        logging.debug(f"Applied following metadata: {metadata_args[0::2]}")
 
 
+@timer
+def convert_audio(src, output_fname):
+    src_file = src
+
+    src = shlex.quote(src)
+    output_fname = shlex.quote(output_fname)
+
+    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
+           '-i', *shlex.split(src), '-vn',
+           *shlex.split(output_fname)]
+
+    subprocess.call(cmd, shell=False)
+
+    try:
+        os.remove(src_file)
+        logging.debug(f"Removed {src_file}")
+        logging.debug(f"Completed audio conversion command: {' '.join(cmd)}")
+    except OSError as e:
+        logging.error(e)
+    except UnicodeError:
+        logging.debug(f"Converted {src} to {output_fname}.")
+
+
+@timer
 def merge_codecs(audio, video, output_fname):
     audio_src = audio
     video_src = video
@@ -166,14 +191,18 @@ def merge_codecs(audio, video, output_fname):
            '-c:v', 'copy',
            *shlex.split(output_fname)]
 
-    logging.debug(f"Running codec merge command: {' '.join(cmd)}")
     subprocess.call(cmd, shell=False)
 
     try:
         os.remove(audio_src)
         os.remove(video_src)
+        logging.debug(f"Removed {audio_src}")
+        logging.debug(f"Removed {video_src}")
+        logging.debug(f"Completed codec merge command: {' '.join(cmd)}")
     except OSError as e:
         logging.error(e)
+    except UnicodeError:
+        logging.debug(f"Merged {audio_src} and {video_src}.")
 
 
 if __name__ == "__main__":

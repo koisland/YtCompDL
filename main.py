@@ -7,69 +7,57 @@ from functools import reduce
 
 from dotenv import load_dotenv
 from argparse import ArgumentParser
+from tqdm import tqdm
 from googleapiclient.discovery import build
 from pytube.helpers import safe_filename
 
 # local imports
 from downloader import Pytube_Dl
 from ffmpeg_utils import slice_audio, apply_afade, apply_metadata
+from config import Config
 from utils import timer
+from errors import YTAPIError, PostProcessError, PyTubeError
 
+logger = logging.getLogger('googleapiclient.discovery')
+logger.setLevel(logging.ERROR)
 logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
-class YTSingleVideoBreakdown(Pytube_Dl):
+class YTSingleVideoBreakdown(Pytube_Dl, Config):
     # Setup build func to allow access to Youtube API.
     YT = build(serviceName="youtube", version="v3", developerKey=os.environ.get("YT_API_KEY"))
 
-    # Regexp to parse strings (id, timestamps, etc.)
-    YT_ID_REGEX = re.compile(r"(?<=v=)(.*?)(?=(?:&|$))")
-    TIME_PATTERN = r"\d{1,2}:?\d*:\d{2}"
-    # Spacer characters between time or titles to ignore.
-    IGNORE_CHRS = r"—|-|\s|\[|\]"
-    # Works only if text is split line-by-line.
-    YT_START_TIMESTAMPS_REGEX = \
-        re.compile(f"(.*?)(?:{IGNORE_CHRS})*({TIME_PATTERN})(?:{IGNORE_CHRS})*(.*)")
-    YT_DUR_TIMESTAMPS_REGEX = \
-        re.compile(f"(.*?)(?:{IGNORE_CHRS})*({TIME_PATTERN})(?:{IGNORE_CHRS})*({TIME_PATTERN})(?:{IGNORE_CHRS})*(.*)")
-
-    BASE_TIME = datetime.datetime.strptime("1900-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
-
-    ACCEPTED_TAGS = ("album", "composer", "genre", "artist", "album_artist", "date")
-
-    def __init__(self, video_url, output, metadata=None):
+    def __init__(self, video_url, video_output, res="720p", opt_metadata=None):
         """
         :param video_url: Youtube video url. (string)
         :param album_metadata: Optional album metadata (dict)
         Titles and track numbers applied by default.
         """
-        super().__init__(video_url, output)
+        super().__init__(video_url, video_output, res)
         self.video_url = video_url
-        self.output = output
+        self.video_path = None
+        self.video_output = video_output
         self.video_id = self.extract_id()
-        self.snippets, self.content_details = list(self.get_video_info('snippet', 'contentDetails'))
 
-        # Use pytube helper function "safe_filename". No spaces, &, etc.
+        self.snippets, self.content_details = list(self.get_video_info('snippet', 'contentDetails'))
         self.title = safe_filename(self.snippets['title'])
         self.desc = self.snippets['description']
         self.channel = self.snippets['channelTitle']
         self.upload_time = self.snippets['publishedAt']
         self.year_uploaded = self.upload_time.split('-')[0]
-        self.metadata = self.set_metadata(metadata)
+        self.metadata = self.set_metadata(opt_metadata)
 
-        # datetime.timedelta4
         time_pattern = f"PT{self.set_dtime_format('H')}{self.set_dtime_format('M')}{self.set_dtime_format('S')}"
         self.duration = datetime.datetime.strptime(self.content_details['duration'], time_pattern) - self.BASE_TIME
-
         self.timestamp_style = None
-        self.extract_comments(max_comments=1000)
-        self.timestamps = self.find_timestamps(select_comment=True, save_timestamps=True)
-
-        if self.timestamps is not None:
+        if timestamps := self.find_timestamps(select_comment=False, save_timestamps=True):
+            self.timestamps = timestamps
             self.titles, self.times = self.format_timestamps()
         else:
             self.titles, self.times = None, None
+
+        self.process_prog_bar = None
 
     def set_metadata(self, metadata):
         if metadata is None:
@@ -86,7 +74,7 @@ class YTSingleVideoBreakdown(Pytube_Dl):
                 logging.info("Valid album metadata provided.")
                 return metadata
             else:
-                raise Exception("Invalid album metadata provided.")
+                raise YTAPIError("Invalid album metadata provided.")
 
     @timer
     def download(self, slice_output=True, apply_fade="both", fade_time=0.5):
@@ -97,24 +85,43 @@ class YTSingleVideoBreakdown(Pytube_Dl):
         :param fade_time:
         :return:
         """
-        download_path = os.path.join(os.getcwd(), 'output')
-        video_path = os.path.join(download_path, f"{self.title}.mp3")
 
-        if not os.path.exists(video_path):
-            logging.info(f"Downloading {self.output.lower()} for {self.snippets['title']}.")
-            self.start_dl()
+        if self.video_output.lower() in self.OUTPUT_FILE_EXT.keys():
+            self.video_path = os.path.join(self.OUTPUT_PATH, f"{self.title}.{self.OUTPUT_FILE_EXT[self.output]}")
+        else:
+            raise PyTubeError(f"Invalid output category ({self.video_output}).")
+
+        if not os.path.exists(self.video_path):
+            logging.info(f"Downloading {self.video_output.lower()} for {self.snippets['title']}.")
+            self.pytube_dl()
         else:
             logging.info("Pre-existing file found.")
+
+        self.postprocess(slice_output, apply_fade, fade_time)
+
+    def postprocess(self, slice_output, apply_fade, fade_time):
         if slice_output:
             # Move to downloader section.
             if self.titles and self.times:
-                folder_path = os.path.join(download_path, self.title)
+                folder_path = os.path.join(self.OUTPUT_PATH, self.title)
                 if not os.path.exists(folder_path):
                     os.makedirs(folder_path)
 
-                logging.info(f"Slicing {self.title}...")
-                logging.info(f"Applying fade ({apply_fade})\n")
+                logging.info(f"Slicing {self.title}.")
+                logging.info(f"Applying fade ({apply_fade}).\n")
+
+                # tqdm progbar for iterating thru titles/times.
+                print(f"Processing file: {self.video_path}\n"
+                      f"Slicing: {slice_output}, Applying fade ({fade_time}): {apply_fade}")
+                self.process_prog_bar = tqdm(total=len(self.titles))
+
                 for num, (title, times) in enumerate(zip(self.titles, self.times), 1):
+                    # ffmpeg can't apply inplace so need different files
+                    slice_path = os.path.join(folder_path, f"x{title}.{self.OUTPUT_FILE_EXT[self.output]}")
+                    fade_path = os.path.join(folder_path, f"xx{title}.{self.OUTPUT_FILE_EXT[self.output]}")
+                    final_output = os.path.join(folder_path, f"{title}.{self.OUTPUT_FILE_EXT[self.output]}")
+
+                    # convert timedelta times to seconds (int).
                     duration = [time.seconds for time in times]
 
                     # if empty title or unknown, give generic name.
@@ -123,27 +130,28 @@ class YTSingleVideoBreakdown(Pytube_Dl):
                         title = f"track_{num}"
                     else:
                         title = safe_filename(title)
-                    s_path = os.path.join(folder_path, f"x{title}.mp3")
-                    f_path = os.path.join(folder_path, f"xx{title}.mp3")
-                    final_output = os.path.join(folder_path, f"{title}.mp3")
 
-                    slice_audio(source=video_path, output=s_path, duration=duration)
+                    slice_audio(source=self.video_path, output=slice_path, duration=duration)
+
                     if apply_fade:
-                        apply_afade(source=s_path, output=f_path, in_out=apply_fade, duration=times, seconds=fade_time)
+                        apply_afade(source=slice_path, output=fade_path, in_out=apply_fade, duration=times,
+                                    seconds=fade_time)
                     else:
-                        f_path = s_path
+                        fade_path = slice_path
+
                     # can't add metadata inplace
-                    apply_metadata(source=f_path,
+                    apply_metadata(source=fade_path,
                                    output=final_output,
                                    title=title,
                                    track=num,
                                    album_tags=self.metadata)
-
+                    # TODO: Fix creating multiple progbars rather than updating one.
+                    self.process_prog_bar.update(1)
                     logging.info(f"{title.encode('utf-8')} sliced from {duration[0]} to {duration[1]} seconds.\n")
             else:
-                raise Exception("No timestamps to use to slice.")
+                raise PostProcessError("No timestamps to use to slice.")
         else:
-            logging.info(f"Unsliced {self.title} saved to {download_path}")
+            logging.info(f"Unsliced {self.title} saved to {self.OUTPUT_PATH}")
 
     def set_dtime_format(self, char):
         # Sets pattern for converting duration string into datetime.datetime
@@ -199,7 +207,7 @@ class YTSingleVideoBreakdown(Pytube_Dl):
         :param timestamps:  timestamp/title strings (list of lists)
         :return: modified timestamp/title strings (list of lists)
         """
-        pprint.pprint(timestamps)
+        # pprint.pprint(timestamps)
         return [[re.sub("|\[|]|—|-|~", "", item.strip()).strip() for item in timestamp] for timestamp in timestamps]
 
     def convert_str_time(self, str_times, rtn_fmt="datetime"):
@@ -211,7 +219,8 @@ class YTSingleVideoBreakdown(Pytube_Dl):
         """
         # Check if str_times iterable has any invalid dtypes (not a str).
         if any(not isinstance(str_time, str) for str_time in str_times):
-            raise Exception("Unable to convert invalid string timestamp.")
+            raise YTAPIError(f"Unable to convert invalid string timestamp.\n"
+                             f"{str_times}")
         TIME_LENGTH = 8
         # First pad time to standardize.
         converted_times = []
@@ -272,9 +281,6 @@ class YTSingleVideoBreakdown(Pytube_Dl):
             for part in parts:
                 requested_part = info_response['items'][0][part]
                 yield requested_part
-        else:
-            logging.error("Exception occurred", exc_info=True)
-            raise Exception("Unable to parse video id from provided url.")
 
     def set_timestamp_style(self, timestamps):
         # if length of all timestamps is 3, timestamp is based on start of chapter.
@@ -284,7 +290,7 @@ class YTSingleVideoBreakdown(Pytube_Dl):
         elif all(len(timestamp) == 4 for timestamp in timestamps):
             self.timestamp_style = "Duration"
         else:
-            logging.error("Invalid format in retrieved timestamps.")
+            raise YTAPIError("Invalid format in retrieved timestamps.")
 
     @timer
     def find_timestamps(self, select_comment=False, save_timestamps=True):
@@ -315,7 +321,7 @@ class YTSingleVideoBreakdown(Pytube_Dl):
         else:
             # If cannot find timestamps in description, check comments
             logging.info("Timestamps not found in description. Checking comment section.")
-            for comment in self.extract_comments():
+            for comment in self.extract_comments(max_comments=self.MAX_COMMENTS):
                 # Replace '"' with '' to help extract titles
                 # Split comment into lines to avoid bad regex matches at end.
                 comment = comment.replace('"', '').split('\n')
@@ -378,12 +384,12 @@ class YTSingleVideoBreakdown(Pytube_Dl):
         return self.clean_timestamps(chosen_timestamps)
 
     @timer
-    def extract_comments(self, max_comments=500):
+    def extract_comments(self, max_comments):
         # Comment counter
         comments_checked = 0
         # Must be a multiple of 100.
         if max_comments % 100 != 0:
-            raise Exception("Invalid number of comments to check. Must be a multiple of 100.")
+            raise YTAPIError("Invalid number of comments to check. Must be a multiple of 100.")
 
         comment_request = self.YT.commentThreads().list(part="snippet, replies", videoId=self.video_id,
                                                         maxResults=100, order="relevance")
@@ -392,7 +398,6 @@ class YTSingleVideoBreakdown(Pytube_Dl):
         while comment_request:
             comment_response = comment_request.execute()
             if comment_threads := comment_response.get('items'):
-                logging.info('Comments found.')
                 for thread in comment_threads:
                     top_level_comment = thread['snippet']['topLevelComment']
                     yield top_level_comment['snippet']['textOriginal']
@@ -407,19 +412,25 @@ class YTSingleVideoBreakdown(Pytube_Dl):
     def extract_id(self):
         if id_search := re.search(self.YT_ID_REGEX, self.video_url):
             return id_search.group(1)
+        else:
+            raise YTAPIError(f"Unable to parse video id from provided url. ({self.video_url})")
 
 
 if __name__ == "__main__":
     """
     Monogatari Soundtrack - Timestamps (start) in desc.
     """
-    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4")
+    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=aeB9qIZPvK8&t=1015s",
+    #                               video_output="audio")
+    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4",
+    #                               video_output="audio")
 
     """
     LOTR Soundtrack - Timestamps (duration) in comment section. 
     """
-    # test = YTSingleVideoBreakdown(
-    #     video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
+    test = YTSingleVideoBreakdown(
+        video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3",
+        video_output="audio")
 
     """
     Animalcule video - No comments.
@@ -435,8 +446,8 @@ if __name__ == "__main__":
     """
     Hollow Knight Soundtrack - Timestamp in pinned comment. Surrounded in brackets.
     """
-    test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=6",
-                                  output="audio")
+    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=6",
+    #                               video_output="audio")
 
     """
     Chrono Trigger Soundtrack
