@@ -1,7 +1,7 @@
 import logging
 
 
-logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
+logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 

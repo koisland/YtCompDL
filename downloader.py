@@ -1,13 +1,12 @@
 import os
-import pprint
 import pytube
+from pytube.cli import on_progress
 from pytube.helpers import safe_filename
 import logging
-from tqdm import tqdm
+# from tqdm import tqdm
 
 from ffmpeg_utils import merge_codecs, convert_audio
-from utils import timer
-from errors import PyTubeError
+from ytcompdl.errors import PyTubeError
 from config import Config
 
 # Prevent verbose logging for pytube.
@@ -29,8 +28,9 @@ class Pytube_Dl(Config):
         self.adap_streams = False
         self.output_files = []
 
-        self.pt = pytube.YouTube(url=self.url, on_progress_callback=self._show_progress)
+        self.pt = pytube.YouTube(url=self.url, on_progress_callback=on_progress)
         self.streams = self._get_streams()
+        self.streams_filesize = sum(stream.filesize for stream in self.streams)
         self.fname = f"{safe_filename(self.pt.title)}.{self.DEF_DL_FILE_EXT}"
 
     def pytube_dl(self, output=None):
@@ -45,7 +45,6 @@ class Pytube_Dl(Config):
 
         # Setup prog bar and have contain filesize of all desired streams.
         print(f'Downloading "{self.url}" as "{self.fname}".')
-        self.dl_prog_bar = tqdm(total=sum(stream.filesize for stream in self.streams))
 
         for stream in self.streams:
             # prepend output type to prevent overwriting files when downloading video
@@ -64,12 +63,12 @@ class Pytube_Dl(Config):
         # video: merge codecs if source streams were adaptive
         # audio: convert to mp3
         if self.output == "video" and self.adap_streams:
-            print("Merging audio and video.")
+            print("\nMerging audio and video.")
             logging.debug("Merging audio and video codecs")
             merge_codecs(*self.output_files, os.path.join(self.OUTPUT_PATH, self.fname))
         else:
             mp3_fname = self.fname.strip(".mp4") + ".mp3"
-            print(f'Converting "{self.fname}" to "{mp3_fname}"')
+            print(f'\nConverting "{self.fname}" to "{mp3_fname}"')
             convert_audio(*self.output_files, os.path.join(self.OUTPUT_PATH, mp3_fname))
 
     def list_available_resolutions(self):
@@ -105,9 +104,9 @@ class Pytube_Dl(Config):
 
         return streams
 
-    def _show_progress(self, *args):
-        (_, data_chunk, _) = args
-        self.dl_prog_bar.update(len(data_chunk))
+    # def _show_progress(self, *args):
+    #     (_, data_chunk, _) = args
+    #     self.dl_prog_bar.update(len(data_chunk))
 
 
 if __name__ == "__main__":

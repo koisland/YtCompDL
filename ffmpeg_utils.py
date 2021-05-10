@@ -5,8 +5,8 @@ import logging
 from datetime import timedelta
 from collections.abc import Collection
 
-from utils import timer
-from errors import PostProcessError
+from ytcompdl.utils import timer
+from ytcompdl.errors import PostProcessError
 
 logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
@@ -159,7 +159,7 @@ def convert_audio(src, output_fname):
     src = shlex.quote(src)
     output_fname = shlex.quote(output_fname)
 
-    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
+    cmd = ['ffmpeg', '-hide_banner',
            '-i', *shlex.split(src), '-vn',
            *shlex.split(output_fname)]
 
