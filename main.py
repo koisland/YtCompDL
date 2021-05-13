@@ -162,17 +162,14 @@ class YTCompDL(Pytube_Dl, Config):
                     slice_audio(source=self.video_path, output=slice_path, duration=duration)
 
                     if apply_fade:
-                        apply_afade(source=slice_path, output=fade_path, in_out=apply_fade, duration=times,
-                                    seconds=fade_time)
+                        apply_afade(source=slice_path, output=fade_path,
+                                    in_out=apply_fade, duration=times, seconds=fade_time)
                     else:
                         fade_path = slice_path
 
                     # can't add metadata inplace
-                    apply_metadata(source=fade_path,
-                                   output=final_output,
-                                   title=title,
-                                   track=num,
-                                   album_tags=self.metadata)
+                    apply_metadata(source=fade_path, output=final_output,
+                                   title=title, track=num, album_tags=self.metadata)
 
                     self.process_prog_bar.update(1)
                     logging.info(f"{title.encode('utf-8')} sliced from {duration[0]} to {duration[1]} seconds.\n")
@@ -314,17 +311,17 @@ class YTCompDL(Pytube_Dl, Config):
         else:
             raise YTAPIError("Invalid format in retrieved timestamps.")
 
-    def find_timestamps(self, timestamp_string):
+    @staticmethod
+    def find_timestamps(timestamp_string):
         # Replace '"' with '' to help extract titles
         # Split comment into lines to avoid bad regex matches at end.
         timestamp_string = timestamp_string.replace('"', '').split('\n')
-        dur_timestamps = [re.findall(self.YT_DUR_TIMESTAMPS_REGEX, line) for line in timestamp_string
-                          if re.findall(self.YT_DUR_TIMESTAMPS_REGEX, line)]
-        start_timestamps = [re.findall(self.YT_START_TIMESTAMPS_REGEX, line) for line in timestamp_string
-                            if re.findall(self.YT_START_TIMESTAMPS_REGEX, line)]
+        dur_timestamps = [re.findall(Config.YT_DUR_TIMESTAMPS_REGEX, line) for line in timestamp_string
+                          if re.findall(Config.YT_DUR_TIMESTAMPS_REGEX, line)]
+        start_timestamps = [re.findall(Config.YT_START_TIMESTAMPS_REGEX, line) for line in timestamp_string
+                            if re.findall(Config.YT_START_TIMESTAMPS_REGEX, line)]
         return dur_timestamps, start_timestamps
 
-    @timer
     @property
     def timestamps(self):
         """
@@ -365,10 +362,9 @@ class YTCompDL(Pytube_Dl, Config):
 
             # If choose_comment=True, allow to choose which timestamps to select when multiple are valid.
             # Else, return comment timestamps with highest percentage identity.
+            if len(valid_timestamps) == 0:
+                raise YTAPIError(f"No valid timestamps found in comments.")
             if self.choose_comment:
-                if len(valid_timestamps) < 0:
-                    logging.info(f"No valid timestamps found in comments.")
-                    return
                 comment_num = self.select_comment(valid_timestamps)
                 chosen_comment = valid_timestamps[int(comment_num) - 1]
                 chosen_timestamps = parsed_timestamps[int(comment_num) - 1]
@@ -456,11 +452,6 @@ if __name__ == "__main__":
     #     video_output="audio")
 
     """
-    Animalcule video - No comments.
-    """
-    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=wXy2T3zXkAs", video_output="video")
-
-    """
     BFV Soundtrack - Timestamp (start) in comment section. Some untitled chapters just have new line char.
     """
     # test = YTCompDL(video_url="https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz
@@ -476,13 +467,14 @@ if __name__ == "__main__":
     Chrono Trigger Soundtrack
     Title is first, timestamps are second.
     """
-    test = YTCompDL(video_url="https://www.youtube.com/watch?v=waxQzdbixLk",
-                    video_output="audio")
+    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=waxQzdbixLk",
+    #                 video_output="audio")
 
     """
     Contradiction Soundtrack
+    No timestamps.
     """
-    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4")
+    test = YTCompDL(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4", video_output="audio")
 
     # Start download
     # test.download(slice_output=True, apply_fade="both", fade_time=0.5)
