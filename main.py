@@ -26,7 +26,8 @@ class YTCompDL(Pytube_Dl, Config):
     # Setup build func to allow access to Youtube API.
     YT = build(serviceName="youtube", version="v3", developerKey=os.environ.get("YT_API_KEY"))
 
-    def __init__(self, video_url, video_output, res="720p", opt_metadata=None):
+    def __init__(self, video_url, video_output,
+                 res="720p", opt_metadata=None, choose_comment=False, save_timestamps=True):
         """
         :param video_url: Youtube video url. (string)
         :param video_output: Desired output from video. (string - "audio", "video")
@@ -47,13 +48,11 @@ class YTCompDL(Pytube_Dl, Config):
         self.upload_time = self.snippets['publishedAt']
         self.year_uploaded = self.upload_time.split('-')[0]
 
+        self.choose_comment = choose_comment
+        self.save_timestamps = save_timestamps
         self.comment = None
         self.timestamp_style = None
-        if timestamps := self.parse_timestamps(select_comment=False, save_timestamps=True):
-            self.timestamps = timestamps
-            self.titles, self.times = self.format_timestamps()
-        else:
-            self.titles, self.times = None, None
+        self.titles, self.times = self.format_timestamps()
 
         self.process_prog_bar = None
 
@@ -243,11 +242,11 @@ class YTCompDL(Pytube_Dl, Config):
         if any(not isinstance(str_time, str) for str_time in str_times):
             raise YTAPIError(f"Unable to convert invalid string timestamp.\n"
                              f"{str_times}")
-        TIME_LENGTH = 8
+        time_length = 8
         # First pad time to standardize.
         converted_times = []
         for str_time in str_times:
-            while len(str_time) < TIME_LENGTH:
+            while len(str_time) < time_length:
                 # if str_time close to next time unit (hour, minute, etc.)
                 if (len(str_time) + 1) % 3 == 0:
                     # Append colon.
@@ -272,7 +271,8 @@ class YTCompDL(Pytube_Dl, Config):
         # Iterate through each timestamp ignoring last item, the track title.
         dt_timestamps = [self.convert_str_time(timestamp[1:-1]) for timestamp in timestamps]
         if self.timestamp_style == "Start":
-            # convert_str_time returns a list of datetimes. only one datetime with start timestamp style so take first item.
+            # convert_str_time returns a list of datetimes. only one datetime with start timestamp style so take
+            # first item.
             dt_timestamps = [dt[0] for dt in dt_timestamps]
             # subtract next timestamp by current current timestamp
             dt_lengths = [dt_timestamps[ind + 1] - dt_timestamps[ind] for ind in range(len(dt_timestamps) - 1)]
@@ -318,19 +318,18 @@ class YTCompDL(Pytube_Dl, Config):
         # Replace '"' with '' to help extract titles
         # Split comment into lines to avoid bad regex matches at end.
         timestamp_string = timestamp_string.replace('"', '').split('\n')
-        dur_timestamps = [re.findall(self.YT_DUR_TIMESTAMPS_REGEX, line) for line in timestamp_string 
+        dur_timestamps = [re.findall(self.YT_DUR_TIMESTAMPS_REGEX, line) for line in timestamp_string
                           if re.findall(self.YT_DUR_TIMESTAMPS_REGEX, line)]
-        start_timestamps = [re.findall(self.YT_START_TIMESTAMPS_REGEX, line) for line in timestamp_string 
+        start_timestamps = [re.findall(self.YT_START_TIMESTAMPS_REGEX, line) for line in timestamp_string
                             if re.findall(self.YT_START_TIMESTAMPS_REGEX, line)]
         return dur_timestamps, start_timestamps
 
     @timer
-    def parse_timestamps(self, select_comment=False, save_timestamps=True):
+    @property
+    def timestamps(self):
         """
         Found timestamps will always be in this form: (str_title_front, *timestamp, str_title_back)
         * timestamp can be one - two strings
-        :param select_comment:
-        :param save_timestamps:
         :return:
         """
         valid_timestamps = []
@@ -364,11 +363,10 @@ class YTCompDL(Pytube_Dl, Config):
                         parsed_timestamps.append(comm_timestamps)
                         logging.info(f"Valid comment timestamps found ({time_perc_identity}).")
 
-            # If select_comment=True, allow to choose which timestamps to select when multiple are valid.
+            # If choose_comment=True, allow to choose which timestamps to select when multiple are valid.
             # Else, return comment timestamps with highest percentage identity.
-            if select_comment:
-                total_comments = len(valid_timestamps)
-                if total_comments < 0:
+            if self.choose_comment:
+                if len(valid_timestamps) < 0:
                     logging.info(f"No valid timestamps found in comments.")
                     return
                 comment_num = self.select_comment(valid_timestamps)
@@ -384,8 +382,8 @@ class YTCompDL(Pytube_Dl, Config):
             self.set_timestamp_style(chosen_timestamps)
 
         # Save timestamps to file named f"{title}_timestamps.txt"
-        if save_timestamps:
-            self.save_timestamps(chosen_comment)
+        if self.save_timestamps:
+            self.save_comment(chosen_comment)
 
         return self.clean_timestamps(chosen_timestamps)
 
@@ -395,15 +393,15 @@ class YTCompDL(Pytube_Dl, Config):
             print(f"[{num + 1}]")
             pprint.pprint(v_comment)
 
-        question = input(f"Select comment. (1-{total_comments})\n")
-        while int(question) not in range(1, total_comments + 1):
+        question = input(f"Select comment. (1-{len(valid_timestamps)})\n")
+        while int(question) not in range(1, len(valid_timestamps) + 1):
             print(f"Invalid comment ({question}). Please try again.\n")
-            question = input(f"Select comment. (1-{total_comments})\n")
+            question = input(f"Select comment. (1-{len(valid_timestamps)})\n")
 
         logging.info(f"Comment {int(question)} chosen for timestamps.")
         return question
 
-    def save_timestamps(self, chosen_comment):
+    def save_comment(self, chosen_comment):
         output_path = os.path.join(os.getcwd(), 'output')
         try:
             timestamp_fname = os.path.join(output_path, f'{self.title}_timestamps.txt')
@@ -465,20 +463,21 @@ if __name__ == "__main__":
     """
     BFV Soundtrack - Timestamp (start) in comment section. Some untitled chapters just have new line char.
     """
-    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3")
+    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz
+    # &index=3")
 
     """
     Hollow Knight Soundtrack - Timestamp in pinned comment. Surrounded in brackets.
     """
-    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=6",
-    #                               video_output="audio")
+    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz
+    # &index=6", video_output="audio")
 
     """
     Chrono Trigger Soundtrack
     Title is first, timestamps are second.
     """
     test = YTCompDL(video_url="https://www.youtube.com/watch?v=waxQzdbixLk",
-                                  video_output="audio")
+                    video_output="audio")
 
     """
     Contradiction Soundtrack

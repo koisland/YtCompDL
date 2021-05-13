@@ -2,7 +2,7 @@ import os
 import timeit
 import mimetypes
 import logging
-from PIL import Image
+# from PIL import Image
 
 logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
