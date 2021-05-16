@@ -5,6 +5,7 @@ import pprint
 import logging
 from functools import reduce
 
+import asyncio
 from tqdm import tqdm
 from googleapiclient.discovery import build
 from pytube.helpers import safe_filename
@@ -41,7 +42,9 @@ class YTCompDL(Pytube_Dl, Config):
         self.video_output = video_output
         self.opt_metadata = opt_metadata
 
+        # TODO:
         self.snippets, self.content_details = list(self.get_video_info(*self.YT_VIDEO_PARTS))
+
         self.title = safe_filename(self.snippets['title'])
         self.desc = self.snippets['description']
         self.channel = self.snippets['channelTitle']
@@ -52,7 +55,9 @@ class YTCompDL(Pytube_Dl, Config):
         self.save_timestamps = save_timestamps
         self.comment = None
         self.timestamp_style = None
-        self.titles, self.times = self.format_timestamps()
+
+        # TODO:
+        self.titles, self.times = await self.format_timestamps()
 
         self.process_prog_bar = None
 
@@ -104,7 +109,7 @@ class YTCompDL(Pytube_Dl, Config):
                 raise YTAPIError("Invalid album metadata provided.")
 
     @timer
-    def download(self, slice_output=True, apply_fade="both", fade_time=0.5):
+    async def download(self, slice_output=True, apply_fade="both", fade_time=0.5):
         """
         Download YT video provided by url and slice into individual videos using timestamps.
         :param slice_output: slice output using timestamps? (boolean)
@@ -124,9 +129,9 @@ class YTCompDL(Pytube_Dl, Config):
         else:
             logging.info("Pre-existing file found.")
 
-        self._postprocess(slice_output, apply_fade, fade_time)
+        await self._postprocess(slice_output, apply_fade, fade_time)
 
-    def _postprocess(self, slice_output, apply_fade, fade_time):
+    async def _postprocess(self, slice_output, apply_fade, fade_time):
         if slice_output and isinstance(slice_output, bool):
             # Move to downloader section.
             if self.titles and self.times:
@@ -159,17 +164,17 @@ class YTCompDL(Pytube_Dl, Config):
                     else:
                         title = safe_filename(title)
 
-                    slice_audio(source=self.video_path, output=slice_path, duration=duration)
+                    await slice_audio(source=self.video_path, output=slice_path, duration=duration)
 
                     if apply_fade:
-                        apply_afade(source=slice_path, output=fade_path,
-                                    in_out=apply_fade, duration=times, seconds=fade_time)
+                        await apply_afade(source=slice_path, output=fade_path,
+                                          in_out=apply_fade, duration=times, seconds=fade_time)
                     else:
                         fade_path = slice_path
 
                     # can't add metadata inplace
-                    apply_metadata(source=fade_path, output=final_output,
-                                   title=title, track=num, album_tags=self.metadata)
+                    await apply_metadata(source=fade_path, output=final_output,
+                                         title=title, track=num, album_tags=self.metadata)
 
                     self.process_prog_bar.update(1)
                     logging.info(f"{title.encode('utf-8')} sliced from {duration[0]} to {duration[1]} seconds.\n")
@@ -178,7 +183,7 @@ class YTCompDL(Pytube_Dl, Config):
         else:
             logging.info(f"Unsliced {self.title} saved to {self.OUTPUT_PATH}")
 
-    def format_timestamps(self):
+    async def format_timestamps(self):
         """
         Format timestamps by splitting into times and titles
         Convert times into durations that can be fed into ffmpeg. Also add ending times.
@@ -323,7 +328,7 @@ class YTCompDL(Pytube_Dl, Config):
         return dur_timestamps, start_timestamps
 
     @property
-    def timestamps(self):
+    async def timestamps(self):
         """
         Found timestamps will always be in this form: (str_title_front, *timestamp, str_title_back)
         * timestamp can be one - two strings

@@ -14,7 +14,7 @@ logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
 
 # shell=True is a bad idea.
 @timer
-def slice_audio(source, output, duration):
+async def slice_audio(source, output, duration):
     """
 
     :param source:
@@ -116,7 +116,7 @@ def apply_afade(source, output, in_out="both", duration=None, seconds=1):
 
 
 @timer
-def apply_metadata(source, output, title, track, album_tags):
+async def apply_metadata(source, output, title, track, album_tags):
     # source file to remove after metadata is applied.
     src_file = source
     source = shlex.quote(source)
@@ -153,7 +153,7 @@ def apply_metadata(source, output, title, track, album_tags):
 
 
 @timer
-def convert_audio(src, output_fname):
+async def convert_audio(src, output_fname):
     src_file = src
 
     src = shlex.quote(src)
@@ -176,7 +176,7 @@ def convert_audio(src, output_fname):
 
 
 @timer
-def merge_codecs(audio, video, output_fname):
+async def merge_codecs(audio, video, output_fname):
     audio_src = audio
     video_src = video
 
