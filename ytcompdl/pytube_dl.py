@@ -5,15 +5,15 @@ from pytube.helpers import safe_filename
 import logging
 # from tqdm import tqdm
 
-from ffmpeg_utils import merge_codecs, convert_audio
+from ytcompdl.ffmpeg_utils import merge_codecs, convert_audio
 from ytcompdl.errors import PyTubeError
-from config import Config
+from ytcompdl.config import Config
 
 # Prevent verbose logging for pytube.
 pytube_logger = logging.getLogger('pytube')
 pytube_logger.setLevel(logging.ERROR)
 
-logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
+logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
@@ -32,6 +32,22 @@ class Pytube_Dl(Config):
         self.streams = self._get_streams()
         self.streams_filesize = sum(stream.filesize for stream in self.streams)
         self.fname = f"{safe_filename(self.pt.title)}.{self.DEF_DL_FILE_EXT}"
+
+    @property
+    def url(self):
+        return self._url
+
+    @url.setter
+    def url(self, url):
+        self._url = url
+
+    @property
+    def output(self):
+        return self._output
+
+    @output.setter
+    def output(self, output):
+        self._ouput = output
 
     def pytube_dl(self, output=None):
         if output is None:

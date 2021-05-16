@@ -8,7 +8,7 @@ from collections.abc import Collection
 from ytcompdl.utils import timer
 from ytcompdl.errors import PostProcessError
 
-logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
+logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
@@ -206,7 +206,7 @@ async def merge_codecs(audio, video, output_fname):
 
 
 if __name__ == "__main__":
-    base_dir = os.path.join(os.getcwd(), "output")
+    base_dir = os.path.join(os.getcwd(), "../output")
     source_file = os.path.join(base_dir, "The_Lord_of_the_Rings_-_Symphony_Soundtrack_HQ_-_Complete_Album_HQ.mp3")
     output_file = os.path.join(base_dir, "opening.mp3")
     slice_audio(source_file, output_file, [0, 275])

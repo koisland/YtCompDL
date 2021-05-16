@@ -23,6 +23,6 @@ class Config:
     # Download configs
     ACCEPTED_TAGS = ("album", "composer", "genre", "artist", "album_artist", "date")
     OUTPUT_FILE_EXT = {"audio": "mp3", "video": "mp4"}
-    OUTPUT_PATH = os.path.join(os.getcwd(), 'output')
+    OUTPUT_PATH = os.path.join(os.getcwd(), '../output')
     DEF_DL_FILE_EXT = "mp4"
     DEF_RESOLUTIONS = ("2160p", "1440p", "1080p", "720p", "480p", "360p", "240p", "144p")

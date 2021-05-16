@@ -1,6 +1,5 @@
 import unittest
-import main
-from main import YTCompDL
+from ytcompdl.yt_comp_dl import YTCompDL
 
 
 class TestMain(unittest.TestCase):
