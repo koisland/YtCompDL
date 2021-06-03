@@ -29,7 +29,6 @@ class Pytube_Dl(Config):
         self.output_files = []
 
         self.pt = pytube.YouTube(url=self.url, on_progress_callback=on_progress)
-        self.streams = self._get_streams()
         self.streams_filesize = sum(stream.filesize for stream in self.streams)
         self.fname = f"{safe_filename(self.pt.title)}.{self.DEF_DL_FILE_EXT}"
 
@@ -47,9 +46,9 @@ class Pytube_Dl(Config):
 
     @output.setter
     def output(self, output):
-        self._ouput = output
+        self._output = output
 
-    def pytube_dl(self, output=None):
+    async def pytube_dl(self, output=None):
         if output is None:
             output = self.OUTPUT_PATH
         if not os.path.exists(output):
@@ -81,11 +80,11 @@ class Pytube_Dl(Config):
         if self.output == "video" and self.adap_streams:
             print("\nMerging audio and video.")
             logging.debug("Merging audio and video codecs")
-            merge_codecs(*self.output_files, os.path.join(self.OUTPUT_PATH, self.fname))
+            await merge_codecs(*self.output_files, os.path.join(self.OUTPUT_PATH, self.fname))
         else:
             mp3_fname = self.fname.strip(".mp4") + ".mp3"
             print(f'\nConverting "{self.fname}" to "{mp3_fname}"')
-            convert_audio(*self.output_files, os.path.join(self.OUTPUT_PATH, mp3_fname))
+            await convert_audio(*self.output_files, os.path.join(self.OUTPUT_PATH, mp3_fname))
 
     def list_available_resolutions(self):
         resolutions = {stream.resolution for stream in self.pt.streams.filter(type="video")}
@@ -93,32 +92,29 @@ class Pytube_Dl(Config):
         print(sorted_res)
         return sorted_res
 
-    def _get_streams(self):
-        streams = []
+    @property
+    def streams(self):
         # both outputs will need the audio stream. audio stream output is mp4a
-        # [print(stream) for stream in self.pt.streams.filter(only_audio=True)]
         audio_stream = self.pt.streams.get_audio_only()
 
         if self.output == "audio":
-            streams.append(audio_stream)
+            yield audio_stream
         elif self.output == "video":
             if self.res in self.DEF_RESOLUTIONS:
                 if video_stream := self.pt.streams.filter(res=self.res).first():
                     # Will need to know to merge adaptive streams later.
                     self.adap_streams = True
-                    streams.append(video_stream)
-                    streams.append(audio_stream)
+                    yield video_stream
+                    yield audio_stream
                 else:
                     logging.info(f"No video stream found with desired resolution: {self.res}")
                     prog_stream = self.pt.streams.get_highest_resolution()
                     logging.info(f"Defaulting to progressive stream with highest resolution ({prog_stream.resolution}).")
-                    streams.append(prog_stream)
+                    yield prog_stream
             else:
                 raise PyTubeError(f"Invalid resolution ({self.res}).")
         else:
             raise PyTubeError(f"Invalid format ({self.output}).")
-
-        return streams
 
     # def _show_progress(self, *args):
     #     (_, data_chunk, _) = args

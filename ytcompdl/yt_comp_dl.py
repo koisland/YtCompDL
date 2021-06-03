@@ -17,9 +17,9 @@ from ytcompdl.config import Config
 from ytcompdl.utils import timer
 from ytcompdl.errors import YTAPIError, PostProcessError, PyTubeError
 
-logger = logging.getLogger('googleapiclient.discovery')
+logger = logging.getLogger('googleapiclient.discovery_cache')
 logger.setLevel(logging.ERROR)
-logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG,
+logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
@@ -128,7 +128,7 @@ class YTCompDL(Pytube_Dl, Config):
 
         if not os.path.exists(self.video_path):
             logging.info(f"Downloading {self.video_output.lower()} for {self.snippets['title']}.")
-            self.pytube_dl()
+            await self.pytube_dl()
         else:
             logging.info("Pre-existing file found.")
 
@@ -162,6 +162,7 @@ class YTCompDL(Pytube_Dl, Config):
 
                     # if empty title or unknown, give generic name.
                     # else clean and format.
+
                     if title in ("", "?"):
                         title = f"track_{num}"
                     else:
@@ -324,11 +325,13 @@ class YTCompDL(Pytube_Dl, Config):
         # Replace '"' with '' to help extract titles
         # Split comment into lines to avoid bad regex matches at end.
         timestamp_string = timestamp_string.replace('"', '').split('\n')
-        dur_timestamps = [re.findall(Config.YT_DUR_TIMESTAMPS_REGEX, line) for line in timestamp_string
-                          if re.findall(Config.YT_DUR_TIMESTAMPS_REGEX, line)]
-        start_timestamps = [re.findall(Config.YT_START_TIMESTAMPS_REGEX, line) for line in timestamp_string
-                            if re.findall(Config.YT_START_TIMESTAMPS_REGEX, line)]
-        return dur_timestamps, start_timestamps
+
+        for line in timestamp_string:
+            if timestamps := re.findall(Config.TIME_PATTERN, line):
+                if len(timestamps) == 1:
+                    yield re.findall(Config.YT_START_TIMESTAMPS_REGEX, line)
+                elif len(timestamps) == 2:
+                    yield re.findall(Config.YT_DUR_TIMESTAMPS_REGEX, line)
 
     @property
     def timestamps(self):
@@ -340,9 +343,7 @@ class YTCompDL(Pytube_Dl, Config):
         valid_timestamps = []
         parsed_timestamps = []
 
-        (desc_dur_timestamps, desc_start_timestamps) = self.find_timestamps(self.desc)
-
-        if desc_timestamps := desc_dur_timestamps or desc_start_timestamps:
+        if desc_timestamps := list(self.find_timestamps(self.desc)):
             logging.info("Timestamps found in description.")
             chosen_comment = self.desc.split('\n')
             # remove extra list from list comprehension
@@ -353,12 +354,9 @@ class YTCompDL(Pytube_Dl, Config):
         else:
             # If cannot find timestamps in description, check comments
             logging.info("Timestamps not found in description. Checking comment section.")
+
             for comment in self.extract_comments(max_comments=self.MAX_COMMENTS):
-
-                (comm_dur_timestamps, comm_start_timestamps) = self.find_timestamps(comment)
-
-                # Whichever one isn't an empty list (Not found).
-                if comm_timestamps := comm_dur_timestamps or comm_start_timestamps:
+                if comm_timestamps := list(self.find_timestamps(comment)):
                     comm_timestamps = reduce(lambda x, y: x + y, comm_timestamps)
                     # Set timestamp style.
 
