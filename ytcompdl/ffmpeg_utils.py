@@ -12,18 +12,27 @@ logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
+def check_file_paths(source, output):
+    if not os.path.exists(source):
+        raise PostProcessError("Invalid file source.")
+    if os.path.exists(output):
+        # remove incomplete intermediate file if output exists.
+        os.remove(source)
+        raise PostProcessError("Invalid file output path. Already exists.")
+
+
 # shell=True is a bad idea.
 @timer
 async def slice_audio(source, output, duration):
     """
-
+    Slice audio source by single duration given.
     :param source:
     :param output:
     :param duration:
     :return:
     """
-    if not os.path.exists(source) or os.path.exists(output):
-        raise PostProcessError("Invalid file source or output.")
+    check_file_paths(source, output)
+
     if not isinstance(duration, Collection) and all(isinstance(time, timedelta) for time in duration):
         raise PostProcessError("Invalid duration times.")
 
@@ -48,7 +57,7 @@ async def slice_audio(source, output, duration):
 
 
 @timer
-def apply_afade(source, output, in_out="both", duration=None, seconds=1):
+async def apply_afade(source, output, in_out="both", duration=None, seconds=1):
     """
     Apply audio fade to one or both ends of source audio for some number of seconds.
     :param source:
@@ -58,6 +67,9 @@ def apply_afade(source, output, in_out="both", duration=None, seconds=1):
     :param seconds:
     :return:
     """
+
+    check_file_paths(source, output)
+
     src_file = source
     source = shlex.quote(source)
     output = shlex.quote(output)
@@ -117,6 +129,9 @@ def apply_afade(source, output, in_out="both", duration=None, seconds=1):
 
 @timer
 async def apply_metadata(source, output, title, track, album_tags):
+
+    check_file_paths(source, output)
+
     # source file to remove after metadata is applied.
     src_file = source
     source = shlex.quote(source)
@@ -159,7 +174,7 @@ async def convert_audio(src, output_fname):
     src = shlex.quote(src)
     output_fname = shlex.quote(output_fname)
 
-    cmd = ['ffmpeg', '-hide_banner',
+    cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
            '-i', *shlex.split(src), '-vn',
            *shlex.split(output_fname)]
 

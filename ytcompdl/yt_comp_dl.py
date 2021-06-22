@@ -3,6 +3,7 @@ import re
 import datetime
 import pprint
 import logging
+from os.path import dirname as parent_dir
 from functools import reduce
 
 import asyncio
@@ -41,7 +42,6 @@ class YTCompDL(Pytube_Dl, Config):
         self.video_output = video_output
         self.opt_metadata = opt_metadata
 
-        # TODO:
         self.snippets, self.content_details = list(self.get_video_info(*self.YT_VIDEO_PARTS))
 
         self.title = safe_filename(self.snippets['title'])
@@ -55,7 +55,6 @@ class YTCompDL(Pytube_Dl, Config):
         self.comment = None
         self.timestamp_style = None
 
-        # TODO:
         self.titles, self.times = asyncio.run(self.format_timestamps())
 
         self.process_prog_bar = None
@@ -152,7 +151,7 @@ class YTCompDL(Pytube_Dl, Config):
                                              bar_format=" ↳ |{bar:44}|{percentage:3.0f}%")
 
                 for num, (title, times) in enumerate(zip(self.titles, self.times), 1):
-                    # ffmpeg can't apply inplace so need different files
+                    # ffmpeg can't apply inplace so need intermediate files
                     slice_path = os.path.join(folder_path, f"x{title}.{self.OUTPUT_FILE_EXT[self.output]}")
                     fade_path = os.path.join(folder_path, f"xx{title}.{self.OUTPUT_FILE_EXT[self.output]}")
                     final_output = os.path.join(folder_path, f"{title}.{self.OUTPUT_FILE_EXT[self.output]}")
@@ -168,6 +167,7 @@ class YTCompDL(Pytube_Dl, Config):
                     else:
                         title = safe_filename(title)
 
+                    # async calls applicable here
                     await slice_audio(source=self.video_path, output=slice_path, duration=duration)
 
                     if apply_fade:
@@ -362,7 +362,7 @@ class YTCompDL(Pytube_Dl, Config):
 
                     self.set_timestamp_style(comm_timestamps)
                     if time_perc_identity := self.validate_timestamps(comm_timestamps):
-                        valid_timestamps.append([time_perc_identity, *comment])
+                        valid_timestamps.append([time_perc_identity, *comment.split("\n")])
                         parsed_timestamps.append(comm_timestamps)
                         logging.info(f"Valid comment timestamps found ({time_perc_identity}).")
 
@@ -404,12 +404,11 @@ class YTCompDL(Pytube_Dl, Config):
         return question
 
     def save_comment(self, chosen_comment):
-        output_path = os.path.join(os.getcwd(), '../output')
         try:
-            timestamp_fname = os.path.join(output_path, f'{self.title}_timestamps.txt')
+            timestamp_fname = os.path.join(self.OUTPUT_PATH, f'{self.title}_timestamps.txt')
         except FileNotFoundError:
             # If invalid characters in title.
-            timestamp_fname = os.path.join(output_path, f'video_timestamp_{datetime.datetime.now()}.txt')
+            timestamp_fname = os.path.join(self.OUTPUT_PATH, f'video_timestamp_{datetime.datetime.now()}.txt')
         with open(timestamp_fname, 'w', encoding='utf-8') as fobj:
             fobj.write('\n'.join(chosen_comment))
         logging.info(f"Timestamps saved to {os.path.join(os.getcwd(), timestamp_fname)}.")
@@ -473,14 +472,14 @@ if __name__ == "__main__":
     Chrono Trigger Soundtrack
     Title is first, timestamps are second.
     """
-    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=waxQzdbixLk",
-    #                 video_output="audio")
+    test = YTCompDL(video_url="https://www.youtube.com/watch?v=waxQzdbixLk",
+                    video_output="audio")
 
     """
     Contradiction Soundtrack
     No timestamps.
     """
-    test = YTCompDL(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4", video_output="audio")
+    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4", video_output="audio")
 
     # Start download
-    # test.download(slice_output=True, apply_fade="both", fade_time=0.5)
+    asyncio.run(test.download(slice_output=True, apply_fade="both", fade_time=0.5))

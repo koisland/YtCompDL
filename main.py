@@ -1,6 +1,10 @@
 import argparse
 from ytcompdl.yt_comp_dl import YTCompDL
 
+"""
+command-line version
+"""
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
 

@@ -1,5 +1,5 @@
 import os
-import timeit
+import time
 import mimetypes
 import logging
 # from PIL import Image
@@ -10,9 +10,9 @@ logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG
 
 def timer(func):
     def timed_func(*args, **kwargs):
-        start_time = timeit.default_timer()
+        start_time = time.perf_counter()
         result = func(*args, **kwargs)
-        end_time = timeit.default_timer()
+        end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         logging.debug(f"Total time elapsed for {func.__name__} is {round(elapsed_time, 3)} seconds.")
         return result

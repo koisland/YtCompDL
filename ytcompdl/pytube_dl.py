@@ -29,7 +29,6 @@ class Pytube_Dl(Config):
         self.output_files = []
 
         self.pt = pytube.YouTube(url=self.url, on_progress_callback=on_progress)
-        self.streams_filesize = sum(stream.filesize for stream in self.streams)
         self.fname = f"{safe_filename(self.pt.title)}.{self.DEF_DL_FILE_EXT}"
 
     @property
@@ -116,9 +115,9 @@ class Pytube_Dl(Config):
         else:
             raise PyTubeError(f"Invalid format ({self.output}).")
 
-    # def _show_progress(self, *args):
-    #     (_, data_chunk, _) = args
-    #     self.dl_prog_bar.update(len(data_chunk))
+    @property
+    def stream_filesize(self):
+        return sum(stream.filesize for stream in self.streams)
 
 
 if __name__ == "__main__":
