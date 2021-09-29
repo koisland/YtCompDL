@@ -8,6 +8,7 @@ from collections.abc import Collection
 from ytcompdl.utils import timer
 from ytcompdl.errors import PostProcessError
 
+# file handler w/encoding didn't work so had to do it manually.
 logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -22,7 +23,6 @@ def check_file_paths(source, output):
 
 
 # shell=True is a bad idea.
-@timer
 async def slice_audio(source, output, duration):
     """
     Slice audio source by single duration given.
@@ -36,27 +36,28 @@ async def slice_audio(source, output, duration):
     if not isinstance(duration, Collection) and all(isinstance(time, timedelta) for time in duration):
         raise PostProcessError("Invalid duration times.")
 
-    source = shlex.quote(source)
-    output = shlex.quote(output)
+    esc_source = shlex.quote(source)
+    esc_output = shlex.quote(output)
 
     # ss arg for position, c for codec/copy
     # -map_metadata 0 copy metadata from source to output
     cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
-           '-i', *shlex.split(source),
+           '-i', *shlex.split(esc_source),
            '-map_metadata', '0',
            '-ss', f'{duration[0]}', '-to', f'{duration[1]}',
            '-c', 'copy',
-           *shlex.split(output)]
+           *shlex.split(esc_output)]
     try:
-        logging.debug(f"Running slice command: {' '.join(cmd)}")
-    except UnicodeError:
+        logging.info(f"Running slice command: {' '.join(cmd)}".encode('utf-8'))
+    except (UnicodeEncodeError, UnicodeError):
         # if contains characters that can't be encoded.
-        pass
+        logging.info(f"Sliced source from {duration[0]}-{duration[1]}")
 
     subprocess.call(cmd, shell=False)
 
+    return output
 
-@timer
+
 async def apply_afade(source, output, in_out="both", duration=None, seconds=1):
     """
     Apply audio fade to one or both ends of source audio for some number of seconds.
@@ -70,9 +71,8 @@ async def apply_afade(source, output, in_out="both", duration=None, seconds=1):
 
     check_file_paths(source, output)
 
-    src_file = source
-    source = shlex.quote(source)
-    output = shlex.quote(output)
+    esc_source = shlex.quote(source)
+    esc_output = shlex.quote(output)
 
     if duration is None:
         raise PostProcessError("No track duration given.")
@@ -110,32 +110,32 @@ async def apply_afade(source, output, in_out="both", duration=None, seconds=1):
 
     # TODO: Recheck afade in.
     cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
-           '-i', *shlex.split(source),
+           '-i', *shlex.split(esc_source),
            '-map_metadata', '0',
            '-filter_complex', *afade_cmds[in_out.lower()],
-           *shlex.split(output)]
+           *shlex.split(esc_output)]
 
     subprocess.call(cmd, shell=False)
 
     try:
-        os.remove(src_file)
-        logging.debug(f"Removed {src_file}")
-        logging.debug(f"Completed fade command: {' '.join(cmd)}")
+        os.remove(source)
+        logging.info(f"Removed {source.encode('utf-8')}")
+        logging.info(f"Completed fade command: {' '.join(cmd)}".encode('utf-8'))
     except OSError as e:
         logging.error(e)
-    except UnicodeError:
-        logging.debug(f"Sliced source from {duration[0]}-{duration[1]}")
+    except (UnicodeEncodeError, UnicodeError):
+        logging.info(f"Applied afade: {in_out} for {seconds} seconds.")
+
+    return output
 
 
-@timer
 async def apply_metadata(source, output, title, track, album_tags):
 
     check_file_paths(source, output)
 
     # source file to remove after metadata is applied.
-    src_file = source
-    source = shlex.quote(source)
-    output = shlex.quote(output)
+    esc_source = shlex.quote(source)
+    esc_output = shlex.quote(output)
 
     metadata_args = []
 
@@ -146,28 +146,29 @@ async def apply_metadata(source, output, title, track, album_tags):
         metadata_args.append(tag_str)
 
     cmd = [f'ffmpeg', '-hide_banner', '-loglevel', 'error',
-           '-i', *shlex.split(source),
+           '-i', *shlex.split(esc_source),
            '-map_metadata', '0',
            '-c', 'copy',
            # if title is blank give just generic title
            f'-metadata', f'title={title}', f'-metadata', f'track={str(track)}',
-           *metadata_args, *shlex.split(output)]
+           *metadata_args, *shlex.split(esc_output)]
 
     subprocess.call(cmd, shell=False)
 
     # remove source file
     try:
 
-        os.remove(src_file)
-        logging.debug(f"Removed {src_file}")
-        logging.debug(f"Completed metadata command: {' '.join(cmd)}")
+        os.remove(source)
+        logging.info(f"Removed {source.encode('utf-8')}")
+        logging.info(f"Completed metadata command: {' '.join(cmd)}".encode('utf-8'))
     except OSError as e:
         logging.error(e)
-    except UnicodeError:
-        logging.debug(f"Applied following metadata: {metadata_args[0::2]}")
+    except (UnicodeEncodeError, UnicodeError):
+        logging.info(f"Applied following metadata: {metadata_args[0::2]}")
+
+    return output
 
 
-@timer
 async def convert_audio(src, output_fname):
     src_file = src
 
@@ -182,15 +183,14 @@ async def convert_audio(src, output_fname):
 
     try:
         os.remove(src_file)
-        logging.debug(f"Removed {src_file}")
-        logging.debug(f"Completed audio conversion command: {' '.join(cmd)}")
+        logging.info(f"Removed {src_file.encode('utf-8')}")
+        logging.info(f"Completed audio conversion command: {' '.join(cmd)}".encode('utf-8'))
     except OSError as e:
         logging.error(e)
-    except UnicodeError:
-        logging.debug(f"Converted {src} to {output_fname}.")
+    except (UnicodeEncodeError, UnicodeError):
+        logging.info(f"Converted {src} to {output_fname}.")
 
 
-@timer
 async def merge_codecs(audio, video, output_fname):
     audio_src = audio
     video_src = video
@@ -211,13 +211,13 @@ async def merge_codecs(audio, video, output_fname):
     try:
         os.remove(audio_src)
         os.remove(video_src)
-        logging.debug(f"Removed {audio_src}")
-        logging.debug(f"Removed {video_src}")
-        logging.debug(f"Completed codec merge command: {' '.join(cmd)}")
+        logging.info(f"Removed {audio_src.encode('utf-8')}")
+        logging.info(f"Removed {video_src.encode('utf-8')}")
+        logging.info(f"Completed codec merge command: {' '.join(cmd)}".encode('utf-8'))
     except OSError as e:
         logging.error(e)
-    except UnicodeError:
-        logging.debug(f"Merged {audio_src} and {video_src}.")
+    except (UnicodeEncodeError, UnicodeError):
+        logging.info(f"Merged {audio_src} and {video_src}.")
 
 
 if __name__ == "__main__":

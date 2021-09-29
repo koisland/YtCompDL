@@ -20,7 +20,7 @@ from ytcompdl.errors import YTAPIError, PostProcessError, PyTubeError
 
 logger = logging.getLogger('googleapiclient.discovery_cache')
 logger.setLevel(logging.ERROR)
-logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
+logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
@@ -38,29 +38,41 @@ class YTCompDL(Pytube_Dl, Config):
         Titles and track numbers applied by default.
         """
         self.video_url = video_url
-        self.video_path = None
         self.video_output = video_output
         self.opt_metadata = opt_metadata
-
-        self.snippets, self.content_details = list(self.get_video_info(*self.YT_VIDEO_PARTS))
-
-        self.title = safe_filename(self.snippets['title'])
-        self.desc = self.snippets['description']
-        self.channel = self.snippets['channelTitle']
-        self.upload_time = self.snippets['publishedAt']
-        self.year_uploaded = self.upload_time.split('-')[0]
-
         self.choose_comment = choose_comment
         self.save_timestamps = save_timestamps
+
+        # get video info
+        self.snippets, self.content_details = list(self.get_video_info(*self.YT_VIDEO_PARTS))
+
+        # comment instance vars
         self.comment = None
         self.timestamp_style = None
-
         self.titles, self.times = asyncio.run(self.format_timestamps())
 
+        # download instance_vars
+        self.video_path = None
         self.process_prog_bar = None
 
         # Place at the end to allow custom errors if invalid args.
         super().__init__(video_url, video_output, res)
+
+    @property
+    def title(self):
+        return safe_filename(self.snippets['title'])
+
+    @property
+    def desc(self):
+        return self.snippets['description']
+
+    @property
+    def channel(self):
+        return self.snippets['channelTitle']
+
+    @property
+    def year_uploaded(self):
+        return self.snippets['publishedAt'].split('-')[0]
 
     @property
     def video_id(self):
@@ -110,7 +122,6 @@ class YTCompDL(Pytube_Dl, Config):
             else:
                 raise YTAPIError("Invalid album metadata provided.")
 
-    @timer
     async def download(self, slice_output=True, apply_fade="both", fade_time=0.5):
         """
         Download YT video provided by url and slice into individual videos using timestamps.
@@ -151,6 +162,7 @@ class YTCompDL(Pytube_Dl, Config):
                                              bar_format=" ↳ |{bar:44}|{percentage:3.0f}%")
 
                 for num, (title, times) in enumerate(zip(self.titles, self.times), 1):
+                    title = safe_filename(title)
                     # ffmpeg can't apply inplace so need intermediate files
                     slice_path = os.path.join(folder_path, f"x{title}.{self.OUTPUT_FILE_EXT[self.output]}")
                     fade_path = os.path.join(folder_path, f"xx{title}.{self.OUTPUT_FILE_EXT[self.output]}")
@@ -167,7 +179,7 @@ class YTCompDL(Pytube_Dl, Config):
                     else:
                         title = safe_filename(title)
 
-                    # async calls applicable here
+                    # async gather all three intermediate files and merge
                     await slice_audio(source=self.video_path, output=slice_path, duration=duration)
 
                     if apply_fade:
@@ -181,7 +193,6 @@ class YTCompDL(Pytube_Dl, Config):
                                          title=title, track=num, album_tags=self.metadata)
 
                     self.process_prog_bar.update(1)
-                    logging.info(f"{title.encode('utf-8')} sliced from {duration[0]} to {duration[1]} seconds.\n")
             else:
                 raise PostProcessError("No timestamps to use to slice.")
         else:
@@ -299,7 +310,6 @@ class YTCompDL(Pytube_Dl, Config):
         if percent_threshold <= percent_identity:
             return f"Percent similarity: {round(percent_identity * float(100), 2)}%"
 
-    @timer
     def get_video_info(self, *parts):
         if self.video_id:
             # query desired parts from video with matching video id.
@@ -413,7 +423,6 @@ class YTCompDL(Pytube_Dl, Config):
             fobj.write('\n'.join(chosen_comment))
         logging.info(f"Timestamps saved to {os.path.join(os.getcwd(), timestamp_fname)}.")
 
-    @timer
     def extract_comments(self, max_comments):
         # Comment counter
         comments_checked = 0
@@ -472,14 +481,21 @@ if __name__ == "__main__":
     Chrono Trigger Soundtrack
     Title is first, timestamps are second.
     """
-    test = YTCompDL(video_url="https://www.youtube.com/watch?v=waxQzdbixLk",
-                    video_output="audio")
 
-    """
-    Contradiction Soundtrack
-    No timestamps.
-    """
-    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4", video_output="audio")
+    with cProfile.Profile() as pr:
 
-    # Start download
-    asyncio.run(test.download(slice_output=True, apply_fade="both", fade_time=0.5))
+        test = YTCompDL(video_url="https://www.youtube.com/watch?v=waxQzdbixLk",
+                        video_output="audio")
+
+        """
+        Contradiction Soundtrack
+        No timestamps.
+        """
+        # test = YTCompDL(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4", video_output="audio")
+
+        # Start download
+        asyncio.run(test.download(slice_output=True, apply_fade="both", fade_time=0.5))
+
+    stats = pstats.Stats(pr)
+    stats.sort_stats(pstats.SortKey.TIME)
+    # stats.print_stats()

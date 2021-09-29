@@ -1,3 +1,4 @@
+import asyncio
 import argparse
 from ytcompdl.yt_comp_dl import YTCompDL
 
@@ -20,5 +21,5 @@ if __name__ == "__main__":
 
     args = vars(ap.parse_args())
     dl = YTCompDL(*args.values())
-    print(dl.timestamps)
-    # dl.download()
+    # print(dl.timestamps)
+    asyncio.run(dl.download())
