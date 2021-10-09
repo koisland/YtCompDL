@@ -2,15 +2,26 @@ import os
 import shlex
 import subprocess
 import logging
+import tqdm
 from datetime import timedelta
 from collections.abc import Collection
+from ffmpeg_progress_yield import FfmpegProgress
 
 from ytcompdl.utils import timer
 from ytcompdl.errors import PostProcessError
 
 # file handler w/encoding didn't work so had to do it manually.
-logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG,
+logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
+
+
+# wrapper for ffmpeg_progress_yield w/tqdm progressbar
+def run_ffmpeg_w_progress(ffmpeg_cmd, desc):
+    ff = FfmpegProgress(ffmpeg_cmd)
+    with tqdm.tqdm(total=100, position=1, bar_format=" ↳ |{bar:124}|{percentage:3.0f}%", desc=desc) as pb:
+        pb.write(desc)
+        for prog in ff.run_command_with_progress():
+            pb.update(prog - pb.n)
 
 
 def check_file_paths(source, output):
@@ -53,7 +64,7 @@ async def slice_audio(source, output, duration):
         # if contains characters that can't be encoded.
         logging.info(f"Sliced source from {duration[0]}-{duration[1]}")
 
-    subprocess.call(cmd, shell=False)
+    run_ffmpeg_w_progress(cmd, desc=f"Slicing {source} from {duration[0]}-{duration[1]}.")
 
     return output
 
@@ -115,7 +126,7 @@ async def apply_afade(source, output, in_out="both", duration=None, seconds=1):
            '-filter_complex', *afade_cmds[in_out.lower()],
            *shlex.split(esc_output)]
 
-    subprocess.call(cmd, shell=False)
+    run_ffmpeg_w_progress(cmd, desc=f"Applying fade to {source}: {in_out} for {seconds} seconds.")
 
     try:
         os.remove(source)
@@ -153,7 +164,7 @@ async def apply_metadata(source, output, title, track, album_tags):
            f'-metadata', f'title={title}', f'-metadata', f'track={str(track)}',
            *metadata_args, *shlex.split(esc_output)]
 
-    subprocess.call(cmd, shell=False)
+    run_ffmpeg_w_progress(cmd, desc=f"Applying following metadata: {metadata_args}" )
 
     # remove source file
     try:
@@ -179,7 +190,7 @@ async def convert_audio(src, output_fname):
            '-i', *shlex.split(src), '-vn',
            *shlex.split(output_fname)]
 
-    subprocess.call(cmd, shell=False)
+    run_ffmpeg_w_progress(cmd, desc=f"Converting {src} to audio file.")
 
     try:
         os.remove(src_file)
@@ -206,7 +217,7 @@ async def merge_codecs(audio, video, output_fname):
            '-c:v', 'copy',
            *shlex.split(output_fname)]
 
-    subprocess.call(cmd, shell=False)
+    run_ffmpeg_w_progress(cmd, desc=f"Merging {audio_src} and {video_src}.")
 
     try:
         os.remove(audio_src)

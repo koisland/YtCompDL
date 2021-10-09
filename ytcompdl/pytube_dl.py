@@ -3,7 +3,6 @@ import pytube
 from pytube.cli import on_progress
 from pytube.helpers import safe_filename
 import logging
-# from tqdm import tqdm
 
 from ytcompdl.ffmpeg_utils import merge_codecs, convert_audio
 from ytcompdl.errors import PyTubeError
@@ -13,7 +12,7 @@ from ytcompdl.config import Config
 pytube_logger = logging.getLogger('pytube')
 pytube_logger.setLevel(logging.ERROR)
 
-logging.basicConfig(filename='../yt_data.log', filemode='w', level=logging.DEBUG,
+logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
                     format="%(asctime)s - %(levelname)s - %(message)s")
 
 
@@ -24,7 +23,6 @@ class Pytube_Dl(Config):
         self.output = output
         self.res = res
 
-        self.dl_prog_bar = None
         self.adap_streams = False
         self.output_files = []
 

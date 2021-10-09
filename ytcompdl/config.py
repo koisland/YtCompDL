@@ -24,6 +24,8 @@ class Config:
     # Download configs
     ACCEPTED_TAGS = ("album", "composer", "genre", "artist", "album_artist", "date")
     OUTPUT_FILE_EXT = {"audio": "mp3", "video": "mp4"}
+
+    # TODO: AWS S3 folder here???
     OUTPUT_PATH = os.path.join(parent_dir(parent_dir(__file__)), 'output')
     DEF_DL_FILE_EXT = "mp4"
     DEF_RESOLUTIONS = ("2160p", "1440p", "1080p", "720p", "480p", "360p", "240p", "144p")
