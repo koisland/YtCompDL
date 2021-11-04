@@ -2,10 +2,8 @@ import os
 import time
 import mimetypes
 import logging
-# from PIL import Image
 
-logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+logger = logging.getLogger(__name__)
 
 
 def timer(func):
@@ -14,7 +12,7 @@ def timer(func):
         result = func(*args, **kwargs)
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
-        logging.debug(f"Total time elapsed for {func.__name__} is {round(elapsed_time, 3)} seconds.")
+        logger.debug(f"Total time elapsed for {func.__name__} is {round(elapsed_time, 3)} seconds.")
         return result
 
     return timed_func

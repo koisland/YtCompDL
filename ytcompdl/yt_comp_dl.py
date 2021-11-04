@@ -11,17 +11,14 @@ from tqdm import tqdm
 from googleapiclient.discovery import build
 from pytube.helpers import safe_filename
 
-# local imports
 from ytcompdl.pytube_dl import Pytube_Dl
 from ytcompdl.ffmpeg_utils import slice_audio, apply_afade, apply_metadata
 from ytcompdl.config import Config
 from ytcompdl.utils import timer
 from ytcompdl.errors import YTAPIError, PostProcessError, PyTubeError
 
-logger = logging.getLogger('googleapiclient.discovery_cache')
-logger.setLevel(logging.ERROR)
-logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+
+logger = logging.getLogger(__name__)
 
 
 class YTCompDL(Pytube_Dl, Config):
@@ -48,9 +45,10 @@ class YTCompDL(Pytube_Dl, Config):
         # comment instance vars
         self.comment = None
         self.timestamp_style = None
+        # timestamps
         self.titles, self.times = asyncio.run(self.format_timestamps())
 
-        # download instance_vars
+        # download instance vars
         self.video_path = None
 
         # Place at the end to allow custom errors if invalid args.
@@ -108,14 +106,13 @@ class YTCompDL(Pytube_Dl, Config):
             metadata = {'album': self.snippets['title'],
                         'album_artist': self.channel,
                         'year': self.year_uploaded}
-            logging.info(f"No optional album metadata provided. Applying defaults.\n"
-                         f"{metadata.items()}")
+            logger.info(f"No optional album metadata provided. Applying defaults. {metadata.items()}")
             return metadata
         else:
             if self.opt_metadata and \
                     isinstance(self.opt_metadata, dict) and \
                     all(tag in self.ACCEPTED_TAGS for tag, _ in self.opt_metadata.items()):
-                logging.info("Valid album metadata provided.")
+                logger.info("Valid album metadata provided.")
                 return self.opt_metadata
             else:
                 raise YTAPIError("Invalid album metadata provided.")
@@ -135,10 +132,10 @@ class YTCompDL(Pytube_Dl, Config):
             raise PyTubeError(f"Invalid output category ({self.video_output}).")
 
         if not os.path.exists(self.video_path):
-            logging.info(f"Downloading {self.video_output.lower()} for {self.snippets['title']}.")
+            logger.info(f"Downloading {self.video_output.lower()} for {self.snippets['title']}.")
             await self.pytube_dl()
         else:
-            logging.info("Pre-existing file found.")
+            logger.info("Pre-existing file found.")
 
         await self._postprocess(slice_output, apply_fade, fade_time)
 
@@ -150,12 +147,15 @@ class YTCompDL(Pytube_Dl, Config):
                 if not os.path.exists(folder_path):
                     os.makedirs(folder_path)
 
-                logging.info(f"Slicing {self.title}.")
-                logging.info(f"Applying fade ({apply_fade}).\n")
+                logger.info(f"Slicing {self.title}.")
+                logger.info(f"Applying fade ({apply_fade}).\n")
 
                 # tqdm progbar for iterating thru titles/times.
-                print(f"\nProcessing file: {self.video_path}"
+                print(f"Processing file: {self.video_path}"
                       f"\nSlicing: {slice_output}, Applying fade ({fade_time}): {apply_fade}")
+
+                self.process_prog_bar = tqdm(total=len(self.titles), position=0, leave=True,
+                                             bar_format=" ↳ |{bar:122}| {percentage:3.0f}%")
 
                 for num, (title, times) in enumerate(zip(self.titles, self.times), 1):
                     title = safe_filename(title)
@@ -175,7 +175,6 @@ class YTCompDL(Pytube_Dl, Config):
                     else:
                         title = safe_filename(title)
 
-                    # async gather all three intermediate files and merge
                     await slice_audio(source=self.video_path, output=slice_path, duration=duration)
 
                     if apply_fade:
@@ -188,10 +187,12 @@ class YTCompDL(Pytube_Dl, Config):
                     await apply_metadata(source=fade_path, output=final_output,
                                          title=title, track=num, album_tags=self.metadata)
 
+                    self.process_prog_bar.update(1)
+
             else:
                 raise PostProcessError("No timestamps to use to slice.")
         else:
-            logging.info(f"Unsliced {self.title} saved to {self.OUTPUT_PATH}")
+            logger.info(f"Unsliced {self.title} saved to {self.OUTPUT_PATH}")
 
     async def format_timestamps(self):
         """
@@ -350,7 +351,7 @@ class YTCompDL(Pytube_Dl, Config):
         parsed_timestamps = []
 
         if desc_timestamps := list(self.find_timestamps(self.desc)):
-            logging.info("Timestamps found in description.")
+            logger.info("Timestamps found in description.")
             chosen_comment = self.desc.split('\n')
             # remove extra list from list comprehension
             desc_timestamps = reduce(lambda x, y: x + y, desc_timestamps)
@@ -359,7 +360,7 @@ class YTCompDL(Pytube_Dl, Config):
             chosen_timestamps = self.clean_timestamps(desc_timestamps)
         else:
             # If cannot find timestamps in description, check comments
-            logging.info("Timestamps not found in description. Checking comment section.")
+            logger.info("Timestamps not found in description. Checking comment section.")
 
             for comment in self.extract_comments(max_comments=self.MAX_COMMENTS):
                 if comm_timestamps := list(self.find_timestamps(comment)):
@@ -370,7 +371,7 @@ class YTCompDL(Pytube_Dl, Config):
                     if time_perc_identity := self.validate_timestamps(comm_timestamps):
                         valid_timestamps.append([time_perc_identity, *comment.split("\n")])
                         parsed_timestamps.append(comm_timestamps)
-                        logging.info(f"Valid comment timestamps found ({time_perc_identity}).")
+                        logger.info(f"Valid comment timestamps found ({time_perc_identity}).")
 
             # If choose_comment=True, allow to choose which timestamps to select when multiple are valid.
             # Else, return comment timestamps with highest percentage identity.
@@ -406,7 +407,7 @@ class YTCompDL(Pytube_Dl, Config):
             print(f"Invalid comment ({question}). Please try again.\n")
             question = input(f"Select comment. (1-{len(valid_timestamps)})\n")
 
-        logging.info(f"Comment {int(question)} chosen for timestamps.")
+        logger.info(f"Comment {int(question)} chosen for timestamps.")
         return question
 
     def save_comment(self, chosen_comment):
@@ -417,7 +418,7 @@ class YTCompDL(Pytube_Dl, Config):
             timestamp_fname = os.path.join(self.OUTPUT_PATH, f'video_timestamp_{datetime.datetime.now()}.txt')
         with open(timestamp_fname, 'w', encoding='utf-8') as fobj:
             fobj.write('\n'.join(chosen_comment))
-        logging.info(f"Timestamps saved to {os.path.join(os.getcwd(), timestamp_fname)}.")
+        logger.info(f"Timestamps saved to {os.path.join(os.getcwd(), timestamp_fname)}.")
 
     def extract_comments(self, max_comments):
         # Comment counter
@@ -440,7 +441,7 @@ class YTCompDL(Pytube_Dl, Config):
                 comment_request = self.YT.commentThreads().list_next(comment_request, comment_response)
                 comments_checked += 100
             else:
-                logging.info("No comments found.")
+                logger.info("No comments found.")
             if comments_checked == max_comments:
                 comment_request = None
 
@@ -470,8 +471,8 @@ if __name__ == "__main__":
     """
     Hollow Knight Soundtrack - Timestamp in pinned comment. Surrounded in brackets.
     """
-    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz",
-    #                 video_output="audio")
+    test = YTCompDL(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz",
+                    video_output="audio")
 
     """
     Contradiction Soundtrack

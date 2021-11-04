@@ -1,10 +1,12 @@
 import os
-from os.path import dirname as parent_dir
+import pathlib
 import re
 import datetime
 
 
 class Config:
+    LOG_PATH = pathlib.Path(__file__).parents[1].joinpath("logs", "yt_data.log")
+
     # YT Data API parts of video to get. Fed to get_video_info
     YT_VIDEO_PARTS = ('snippet', 'contentDetails')
     MAX_COMMENTS = 1000
@@ -26,6 +28,6 @@ class Config:
     OUTPUT_FILE_EXT = {"audio": "mp3", "video": "mp4"}
 
     # TODO: AWS S3 folder here???
-    OUTPUT_PATH = os.path.join(parent_dir(parent_dir(__file__)), 'output')
+    OUTPUT_PATH = pathlib.Path(__file__).parents[1].joinpath("output")
     DEF_DL_FILE_EXT = "mp4"
     DEF_RESOLUTIONS = ("2160p", "1440p", "1080p", "720p", "480p", "360p", "240p", "144p")

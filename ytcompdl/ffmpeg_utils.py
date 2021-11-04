@@ -5,23 +5,41 @@ import logging
 import tqdm
 from datetime import timedelta
 from collections.abc import Collection
-from ffmpeg_progress_yield import FfmpegProgress
+from ffmpeg import probe
 
 from ytcompdl.utils import timer
 from ytcompdl.errors import PostProcessError
-
-# file handler w/encoding didn't work so had to do it manually.
-logging.basicConfig(filename='yt_data.log', filemode='w', level=logging.DEBUG,
-                    format="%(asctime)s - %(levelname)s - %(message)s")
+from ytcompdl.config import Config
 
 
-# wrapper for ffmpeg_progress_yield w/tqdm progressbar
+logger = logging.getLogger(__name__)
+
+
+# from better_ffmpeg_progress https://github.com/CrypticSignal/better-ffmpeg-progress
 def run_ffmpeg_w_progress(ffmpeg_cmd, desc):
-    ff = FfmpegProgress(ffmpeg_cmd)
-    with tqdm.tqdm(total=100, position=1, bar_format=" ↳ |{bar:124}|{percentage:3.0f}%", desc=desc) as pb:
-        pb.write(desc)
-        for prog in ff.run_command_with_progress():
-            pb.update(prog - pb.n)
+
+    index_of_filepath = ffmpeg_cmd.index("-i") + 1
+    filepath = ffmpeg_cmd[index_of_filepath]
+
+    file_duration = float(probe(filepath)["format"]["duration"])
+    file_duration = int(file_duration)
+
+    process = subprocess.Popen(
+        ffmpeg_cmd + ["-progress", "-", "-nostats"],
+        stdout=subprocess.PIPE,
+    )
+
+    s_elapsed = 0
+    print(f"\n{desc}")
+    with tqdm.tqdm(total=file_duration, bar_format=" ↳ |{bar:122}| {percentage:3.0f}%") as pb:
+        while process.poll() is None:
+            output = process.stdout.readline().decode("utf-8").strip()
+            if "out_time_ms" in output:
+                microseconds = int(output[12:])
+                secs = int(microseconds / 1_000_000)
+                # subtract seconds added by previous s_elapsed to get number of seconds added to add to prog bar.
+                pb.update(secs - s_elapsed)
+                s_elapsed = secs
 
 
 def check_file_paths(source, output):
@@ -59,12 +77,12 @@ async def slice_audio(source, output, duration):
            '-c', 'copy',
            *shlex.split(esc_output)]
     try:
-        logging.info(f"Running slice command: {' '.join(cmd)}".encode('utf-8'))
+        logger.info(f"Running slice command: {' '.join(cmd)}".encode('utf-8'))
     except (UnicodeEncodeError, UnicodeError):
         # if contains characters that can't be encoded.
-        logging.info(f"Sliced source from {duration[0]}-{duration[1]}")
+        logger.info(f"Sliced source from {duration[0]}-{duration[1]}")
 
-    run_ffmpeg_w_progress(cmd, desc=f"Slicing {source} from {duration[0]}-{duration[1]}.")
+    subprocess.call(cmd, shell=False)
 
     return output
 
@@ -126,22 +144,21 @@ async def apply_afade(source, output, in_out="both", duration=None, seconds=1):
            '-filter_complex', *afade_cmds[in_out.lower()],
            *shlex.split(esc_output)]
 
-    run_ffmpeg_w_progress(cmd, desc=f"Applying fade to {source}: {in_out} for {seconds} seconds.")
+    subprocess.call(cmd, shell=False)
 
     try:
         os.remove(source)
-        logging.info(f"Removed {source.encode('utf-8')}")
-        logging.info(f"Completed fade command: {' '.join(cmd)}".encode('utf-8'))
+        logger.info(f"Removed {source.encode('utf-8')}")
+        logger.info(f"Completed fade command: {' '.join(cmd)}".encode('utf-8'))
     except OSError as e:
-        logging.error(e)
+        logger.error(e)
     except (UnicodeEncodeError, UnicodeError):
-        logging.info(f"Applied afade: {in_out} for {seconds} seconds.")
+        logger.info(f"Applied afade: {in_out} for {seconds} seconds.")
 
     return output
 
 
 async def apply_metadata(source, output, title, track, album_tags):
-
     check_file_paths(source, output)
 
     # source file to remove after metadata is applied.
@@ -164,18 +181,18 @@ async def apply_metadata(source, output, title, track, album_tags):
            f'-metadata', f'title={title}', f'-metadata', f'track={str(track)}',
            *metadata_args, *shlex.split(esc_output)]
 
-    run_ffmpeg_w_progress(cmd, desc=f"Applying following metadata: {metadata_args}" )
+    subprocess.call(cmd, shell=False)
 
     # remove source file
     try:
 
         os.remove(source)
-        logging.info(f"Removed {source.encode('utf-8')}")
-        logging.info(f"Completed metadata command: {' '.join(cmd)}".encode('utf-8'))
+        logger.info(f"Removed {source.encode('utf-8')}")
+        logger.info(f"Completed metadata command: {' '.join(cmd)}".encode('utf-8'))
     except OSError as e:
-        logging.error(e)
+        logger.error(e)
     except (UnicodeEncodeError, UnicodeError):
-        logging.info(f"Applied following metadata: {metadata_args[0::2]}")
+        logger.info(f"Applied following metadata: {metadata_args[0::2]}")
 
     return output
 
@@ -194,12 +211,12 @@ async def convert_audio(src, output_fname):
 
     try:
         os.remove(src_file)
-        logging.info(f"Removed {src_file.encode('utf-8')}")
-        logging.info(f"Completed audio conversion command: {' '.join(cmd)}".encode('utf-8'))
+        logger.info(f"Removed {src_file.encode('utf-8')}")
+        logger.info(f"Completed audio conversion command: {' '.join(cmd)}".encode('utf-8'))
     except OSError as e:
-        logging.error(e)
+        logger.error(e)
     except (UnicodeEncodeError, UnicodeError):
-        logging.info(f"Converted {src} to {output_fname}.")
+        logger.info(f"Converted {src} to {output_fname}.")
 
 
 async def merge_codecs(audio, video, output_fname):
@@ -222,17 +239,10 @@ async def merge_codecs(audio, video, output_fname):
     try:
         os.remove(audio_src)
         os.remove(video_src)
-        logging.info(f"Removed {audio_src.encode('utf-8')}")
-        logging.info(f"Removed {video_src.encode('utf-8')}")
-        logging.info(f"Completed codec merge command: {' '.join(cmd)}".encode('utf-8'))
+        logger.info(f"Removed {audio_src.encode('utf-8')}")
+        logger.info(f"Removed {video_src.encode('utf-8')}")
+        logger.info(f"Completed codec merge command: {' '.join(cmd)}".encode('utf-8'))
     except OSError as e:
-        logging.error(e)
+        logger.error(e)
     except (UnicodeEncodeError, UnicodeError):
-        logging.info(f"Merged {audio_src} and {video_src}.")
-
-
-if __name__ == "__main__":
-    base_dir = os.path.join(os.getcwd(), "../output")
-    source_file = os.path.join(base_dir, "The_Lord_of_the_Rings_-_Symphony_Soundtrack_HQ_-_Complete_Album_HQ.mp3")
-    output_file = os.path.join(base_dir, "opening.mp3")
-    slice_audio(source_file, output_file, [0, 275])
+        logger.info(f"Merged {audio_src} and {video_src}.")

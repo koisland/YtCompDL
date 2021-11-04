@@ -3,6 +3,6 @@
 source venv/Scripts/activate
 
 # hollow knight
-url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz"
+url="https://www.youtube.com/watch?v=upIDgvEJrlg"
 
 python main.py -u "${url}" -o "audio"
