@@ -1,2 +1,35 @@
 # YTCompDL, a Youtube Video Segmenter
-Parses a video's description and comment section for timestamps, downloads the video, converts it to audio or keeps it as a video, and segments it.
+
+---
+Command-line program to download and segment Youtube videos automatically.
+
+![](docs/vid_chapters.jpg)
+
+### Options
+
+---
+* Required:
+  * url (-u) 
+  * output (-o)
+* Optional:
+    * resolution (-r)
+    * metadata (-m)
+    * comment (-c)
+    * timestamps (-t)
+    * slice (-s)
+    * fade (-f)
+    * fade_time (-ft)
+
+### Workflow
+
+---
+* Find timestamps in video description or comments.
+* Download video and/or audio streams from Youtube.
+* Process streams. 
+    * Merge or convert streams.
+    * Slice by timestamps found.
+    * Apply file metadata.
+    * Add audio and/or video fade.
+* Cleanup 
+    * Remove intermediate outputs.
+

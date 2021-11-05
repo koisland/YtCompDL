@@ -59,7 +59,7 @@ class Pytube_Dl(Config):
                 else:
                     categ = "audio_"
                 logger.info(f"Downloading {categ.strip('_')} stream of {stream.title} "
-                             f"as {categ + stream.default_filename}.")
+                            f"as {categ + stream.default_filename}.")
                 self.output_files.append(stream.download(output_path=output, filename_prefix=categ))
             else:
                 logger.info(f"Downloading {stream.title} as {stream.default_filename}.")

@@ -3,6 +3,7 @@ import re
 import datetime
 import pprint
 import logging
+import json
 from os.path import dirname as parent_dir
 from functools import reduce
 
@@ -12,11 +13,10 @@ from googleapiclient.discovery import build
 from pytube.helpers import safe_filename
 
 from ytcompdl.pytube_dl import Pytube_Dl
-from ytcompdl.ffmpeg_utils import slice_audio, apply_afade, apply_metadata
+from ytcompdl.ffmpeg_utils import slice_audio, apply_fade, apply_metadata
 from ytcompdl.config import Config
 from ytcompdl.utils import timer
 from ytcompdl.errors import YTAPIError, PostProcessError, PyTubeError
-
 
 logger = logging.getLogger(__name__)
 
@@ -25,20 +25,30 @@ class YTCompDL(Pytube_Dl, Config):
     # Setup build func to allow access to Youtube API.
     YT = build(serviceName="youtube", version="v3", developerKey=os.environ.get("YT_API_KEY"))
 
-    def __init__(self, video_url, video_output,
-                 res="720p", opt_metadata=None, choose_comment=False, save_timestamps=True):
+    def __init__(self,
+                 video_url: str,
+                 output_type: str,
+                 res: str = "720p", opt_metadata: str = None,
+                 choose_comment: bool = False, save_timestamps: bool = True,
+                 slice_output: bool = True, fade_end: str = "both", fade_time: float = 0.5):
         """
         :param video_url: Youtube video url. (string)
-        :param video_output: Desired output from video. (string - "audio", "video")
-        :param res: Desired resolution (if video_ouput="video"). (string - See config.py)
+        :param output_type: Desired output from video. (string - "audio", "video")
+        :param res: Desired resolution (if video_ouput="video"). (string)
         :param opt_metadata: Optional album metadata (dict)
+        :param slice_output: Slice output by timestamps. (bool)
+        :param fade_end: Fade an end of the output. (string - check config.py)
+        :param fade_time: Time to fade audio or video. (float)
         Titles and track numbers applied by default.
         """
         self.video_url = video_url
-        self.video_output = video_output
+        self.output_type = output_type
         self.opt_metadata = opt_metadata
         self.choose_comment = choose_comment
         self.save_timestamps = save_timestamps
+        self.slice_output = slice_output
+        self.fade_end = fade_end
+        self.fade_time = fade_time
 
         # get video info
         self.snippets, self.content_details = list(self.get_video_info(*self.YT_VIDEO_PARTS))
@@ -52,7 +62,7 @@ class YTCompDL(Pytube_Dl, Config):
         self.video_path = None
 
         # Place at the end to allow custom errors if invalid args.
-        super().__init__(video_url, video_output, res)
+        super().__init__(video_url, output_type, res)
 
     @property
     def title(self):
@@ -99,48 +109,49 @@ class YTCompDL(Pytube_Dl, Config):
         """
         Metadata from video information to add to media.
         If opt_metadata included and validated, use instead.
-        :return: metadata or self.opt_metadata (dict)
+        :return: metadata or data (dict)
         """
         if self.opt_metadata is None:
-            # TODO: Read from json
             metadata = {'album': self.snippets['title'],
                         'album_artist': self.channel,
                         'year': self.year_uploaded}
             logger.info(f"No optional album metadata provided. Applying defaults. {metadata.items()}")
             return metadata
         else:
-            if self.opt_metadata and \
-                    isinstance(self.opt_metadata, dict) and \
-                    all(tag in self.ACCEPTED_TAGS for tag, _ in self.opt_metadata.items()):
+            if os.path.exists(self.opt_metadata) and ".json" in self.opt_metadata:
+                with open(self.opt_metadata, "r") as jfile:
+                    data = json.load(jfile)
+            else:
+                raise YTAPIError("Invalid path to json metadata file.")
+            # check if tags in deserialized json are valid.
+            if all(tag in self.ALLOWED_TAGS for tag, _ in data.items()):
                 logger.info("Valid album metadata provided.")
-                return self.opt_metadata
+                return data
             else:
                 raise YTAPIError("Invalid album metadata provided.")
 
-    async def download(self, slice_output=True, apply_fade="both", fade_time=0.5):
+    async def download(self):
         """
-        Download YT video provided by url and slice into individual videos using timestamps.
-        :param slice_output: slice output using timestamps? (boolean)
-        :param apply_fade:
-        :param fade_time:
-        :return: None
+        Download YT video provided by url and process using timestamps.
+        :return: Output path.
         """
 
-        if self.video_output.lower() in self.OUTPUT_FILE_EXT.keys():
+        if self.output_type.lower() in self.OUTPUT_FILE_EXT.keys():
             self.video_path = os.path.join(self.OUTPUT_PATH, f"{self.title}.{self.OUTPUT_FILE_EXT[self.output]}")
         else:
-            raise PyTubeError(f"Invalid output category ({self.video_output}).")
+            raise PyTubeError(f"Invalid output category ({self.output_type}).")
 
         if not os.path.exists(self.video_path):
-            logger.info(f"Downloading {self.video_output.lower()} for {self.snippets['title']}.")
+            logger.info(f"Downloading {self.output_type.lower()} for {self.snippets['title']}.")
             await self.pytube_dl()
         else:
             logger.info("Pre-existing file found.")
 
-        await self._postprocess(slice_output, apply_fade, fade_time)
+        await self._postprocess()
+        return self.OUTPUT_PATH
 
-    async def _postprocess(self, slice_output, apply_fade, fade_time):
-        if slice_output and isinstance(slice_output, bool):
+    async def _postprocess(self):
+        if self.slice_output and isinstance(self.slice_output, bool):
             # Move to downloader section.
             if self.titles and self.times:
                 folder_path = os.path.join(self.OUTPUT_PATH, self.title)
@@ -148,14 +159,14 @@ class YTCompDL(Pytube_Dl, Config):
                     os.makedirs(folder_path)
 
                 logger.info(f"Slicing {self.title}.")
-                logger.info(f"Applying fade ({apply_fade}).\n")
+                logger.info(f"Applying fade ({self.fade_end}).\n")
 
                 # tqdm progbar for iterating thru titles/times.
                 print(f"Processing file: {self.video_path}"
-                      f"\nSlicing: {slice_output}, Applying fade ({fade_time}): {apply_fade}")
+                      f"\nSlicing: {self.slice_output}, Applying fade ({self.fade_time}): {self.fade_end}")
 
                 self.process_prog_bar = tqdm(total=len(self.titles), position=0, leave=True,
-                                             bar_format=" ↳ |{bar:122}| {percentage:3.0f}%")
+                                             bar_format=" ↳ |{bar:124}| {percentage:3.0f}%")
 
                 for num, (title, times) in enumerate(zip(self.titles, self.times), 1):
                     title = safe_filename(title)
@@ -177,9 +188,9 @@ class YTCompDL(Pytube_Dl, Config):
 
                     await slice_audio(source=self.video_path, output=slice_path, duration=duration)
 
-                    if apply_fade:
-                        await apply_afade(source=slice_path, output=fade_path,
-                                          in_out=apply_fade, duration=times, seconds=fade_time)
+                    if self.fade_end:
+                        await apply_fade(source=slice_path, output=fade_path, output_type=self.output_type,
+                                         fade_end=self.fade_end, duration=times, seconds=self.fade_time)
                     else:
                         fade_path = slice_path
 
@@ -334,7 +345,7 @@ class YTCompDL(Pytube_Dl, Config):
         timestamp_string = timestamp_string.replace('"', '').split('\n')
 
         for line in timestamp_string:
-            if timestamps := re.findall(Config.TIME_PATTERN, line):
+            if timestamps := re.findall(Config.YT_TIME_PATTERN, line):
                 if len(timestamps) == 1:
                     yield re.findall(Config.YT_START_TIMESTAMPS_REGEX, line)
                 elif len(timestamps) == 2:
@@ -451,16 +462,16 @@ if __name__ == "__main__":
     Monogatari Soundtrack - Timestamps (start) in desc.
     """
     # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=aeB9qIZPvK8&t=1015s",
-    #                               video_output="audio")
+    #                               output_type="audio")
     # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4",
-    #                               video_output="audio")
+    #                               output_type="audio")
 
     """
     LOTR Soundtrack - Timestamps (duration) in comment section. 
     """
     # test = YTCompDL(
     #     video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3",
-    #     video_output="audio")
+    #     output_type="audio")
 
     """
     BFV Soundtrack - Timestamp (start) in comment section. Some untitled chapters just have new line char.
@@ -472,13 +483,13 @@ if __name__ == "__main__":
     Hollow Knight Soundtrack - Timestamp in pinned comment. Surrounded in brackets.
     """
     test = YTCompDL(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz",
-                    video_output="audio")
+                    output_type="audio")
 
     """
     Contradiction Soundtrack
     No timestamps.
     """
-    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4", video_output="audio")
+    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=Bs9hJtlFqd4", output_type="audio")
 
     # Start download
-    asyncio.run(test.download(slice_output=True, apply_fade="both", fade_time=0.5))
+    asyncio.run(test.download())

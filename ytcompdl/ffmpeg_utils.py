@@ -11,13 +11,11 @@ from ytcompdl.utils import timer
 from ytcompdl.errors import PostProcessError
 from ytcompdl.config import Config
 
-
 logger = logging.getLogger(__name__)
 
 
 # from better_ffmpeg_progress https://github.com/CrypticSignal/better-ffmpeg-progress
 def run_ffmpeg_w_progress(ffmpeg_cmd, desc):
-
     index_of_filepath = ffmpeg_cmd.index("-i") + 1
     filepath = ffmpeg_cmd[index_of_filepath]
 
@@ -31,7 +29,7 @@ def run_ffmpeg_w_progress(ffmpeg_cmd, desc):
 
     s_elapsed = 0
     print(f"\n{desc}")
-    with tqdm.tqdm(total=file_duration, bar_format=" ↳ |{bar:122}| {percentage:3.0f}%") as pb:
+    with tqdm.tqdm(total=file_duration, bar_format=" ↳ |{bar:124}| {percentage:3.0f}%") as pb:
         while process.poll() is None:
             output = process.stdout.readline().decode("utf-8").strip()
             if "out_time_ms" in output:
@@ -87,12 +85,13 @@ async def slice_audio(source, output, duration):
     return output
 
 
-async def apply_afade(source, output, in_out="both", duration=None, seconds=1):
+async def apply_fade(source, output, output_type, fade_end="both", duration=None, seconds=1):
     """
     Apply audio fade to one or both ends of source audio for some number of seconds.
     :param source:
     :param output:
-    :param in_out:
+    :param output_type:
+    :param fade_end:
     :param duration:
     :param seconds:
     :return:
@@ -111,37 +110,36 @@ async def apply_afade(source, output, in_out="both", duration=None, seconds=1):
             raise PostProcessError(f"Invalid fade time. Longer than track length. ({seconds} > {track_time.seconds})")
     if not (isinstance(seconds, int) or isinstance(seconds, float)):
         raise PostProcessError(f"Invalid fade time. Not a number. ({seconds}:{type(seconds)})")
-    if in_out.lower() not in ("in", "out", "both"):
-        raise PostProcessError(f"Invalid fade option. ({in_out})")
-
-    # https://video.stackexchange.com/questions/19867/how-to-fade-in-out-a-video-audio-clip-with-unknown-duration
-    # afade adds fade for d seconds at start of source
-    # areverse reverses audio source
-    # This way, we don't have to know how long the track is and specify specific times using ffmpeg's fade func.
-
-    # afade_cmds = {
-    #     "in": [f'afade=d={seconds}'],
-    #     "out": [f'areverse, afade=d={seconds}, areverse'],
-    #     "both": [f'afade=d={seconds}, areverse, afade=d={seconds}, areverse']
-    # }
+    if fade_end.lower() not in Config.ALLOWED_FADE_OPTIONS:
+        raise PostProcessError(f"Invalid fade option. ({fade_end})")
 
     # https://stackoverflow.com/questions/43818892/fade-out-video-audio-with-ffmpeg
-    vfade_cmds = {
-        "in": [],
-        "out": [],
-        "both": []
-    }
-    afade_cmds = {
-        "in": [f'afade=in:st=0:d={seconds}'],
-        "out": [f'afade=out:st=0:d={seconds}'],
-        "both": [f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}']
+    fade_cmds = {
+        "video": {
+            "in": ['-filter_complex', f'fade=in:st=0:d={seconds}',
+                   '-filter_complex', f'afade=in:st=0:d={seconds}'],
+            "out": ['-filter_complex', f'fade=t=out:st=0:d={seconds}',
+                    f'-filter_complex', f'afade=t=out:st=0:d={seconds}'],
+            "both": ['-filter_complex',
+                     f'fade=in:st=0:d={seconds}, fade=out:st={track_time.seconds - seconds}:d={seconds}',
+                     '-filter_complex',
+                     f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}'],
+            "none": []
+        },
+        "audio": {
+            "in": ['-filter_complex', f'afade=in:st=0:d={seconds}'],
+            "out": ['-filter_complex', f'afade=out:st=0:d={seconds}'],
+            "both": ['-filter_complex',
+                     f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}'],
+            "none": []
+        }
+
     }
 
-    # TODO: Recheck afade in.
     cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
            '-i', *shlex.split(esc_source),
            '-map_metadata', '0',
-           '-filter_complex', *afade_cmds[in_out.lower()],
+           *fade_cmds[output_type.lower()][fade_end.lower()],
            *shlex.split(esc_output)]
 
     subprocess.call(cmd, shell=False)
@@ -153,7 +151,7 @@ async def apply_afade(source, output, in_out="both", duration=None, seconds=1):
     except OSError as e:
         logger.error(e)
     except (UnicodeEncodeError, UnicodeError):
-        logger.info(f"Applied afade: {in_out} for {seconds} seconds.")
+        logger.info(f"Applied afade: {fade_end} for {seconds} seconds.")
 
     return output
 
