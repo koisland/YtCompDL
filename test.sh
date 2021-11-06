@@ -2,6 +2,6 @@
 
 source venv/Scripts/activate
 
-url="https://www.youtube.com/watch?v=80OvNaEgmmw"
+url="https://www.youtube.com/watch?v=DyY9Wpfajqo"
 
-python main.py -u "${url}" -o "video"
+python main.py -u "${url}" -o "video" -c -t

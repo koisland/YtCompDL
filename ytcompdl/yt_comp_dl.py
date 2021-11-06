@@ -24,6 +24,11 @@ logger = logging.getLogger(__name__)
 class YTCompDL(Pytube_Dl, Config):
     # Setup build func to allow access to Youtube API.
     YT = build(serviceName="youtube", version="v3", developerKey=os.environ.get("YT_API_KEY"))
+    # YT Data API parts of video to get. Fed to get_video_info
+    YT_VIDEO_PARTS = ('snippet', 'contentDetails')
+    # Subtract by one base time to be consistent with timedeltas.
+    BASE_TIME = datetime.datetime.strptime("1900-01-01 00:00:00", "%Y-%m-%d %H:%M:%S")
+    YT_ISO_DUR_REGEX = re.compile("(\d{1,2}H)?(\d{1,2}M)?(\d{1,2}S)")
 
     def __init__(self,
                  video_url: str,
@@ -97,7 +102,7 @@ class YTCompDL(Pytube_Dl, Config):
         Converts iso8601 duration string into duration as datetime timedelta .
         :return: duration (datetime timedelta)
         """
-        if hms := re.search(self.ISO_DUR_REGEX, self.content_details['duration']):
+        if hms := re.search(self.YT_ISO_DUR_REGEX, self.content_details['duration']):
             dt_strptime_fmt = "PT" + ''.join("%" + (match[-1] * 2) for match in hms.groups() if match)
             duration = datetime.datetime.strptime(self.content_details['duration'], dt_strptime_fmt) - self.BASE_TIME
             return duration
@@ -286,7 +291,7 @@ class YTCompDL(Pytube_Dl, Config):
 
     def validate_timestamps(self, timestamps, min_num_timestamps=5, percent_threshold=0.5):
         # If total number of timestamps below minimum, reject timestamps
-        # If total length not within 5% of actual video length, reject timestamps.
+        # If total length not within 50% of actual video length, reject timestamps.
 
         if len(timestamps) < min_num_timestamps:
             return
@@ -459,30 +464,9 @@ class YTCompDL(Pytube_Dl, Config):
 
 if __name__ == "__main__":
     """
-    Monogatari Soundtrack - Timestamps (start) in desc.
+    FNV Soundtrack - Timestamp in pinned comment.
     """
-    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=aeB9qIZPvK8&t=1015s",
-    #                               output_type="audio")
-    # test = YTSingleVideoBreakdown(video_url="https://www.youtube.com/watch?v=80EUn_6OJ-Q&list=LL&index=4",
-    #                               output_type="audio")
-
-    """
-    LOTR Soundtrack - Timestamps (duration) in comment section. 
-    """
-    # test = YTCompDL(
-    #     video_url="https://www.youtube.com/watch?v=OJk_1C7oRZg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz&index=3",
-    #     output_type="audio")
-
-    """
-    BFV Soundtrack - Timestamp (start) in comment section. Some untitled chapters just have new line char.
-    """
-    # test = YTCompDL(video_url="https://www.youtube.com/watch?v=KBujC9Sbhas&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz
-    # &index=3")
-
-    """
-    Hollow Knight Soundtrack - Timestamp in pinned comment. Surrounded in brackets.
-    """
-    test = YTCompDL(video_url="https://www.youtube.com/watch?v=0HbnqjGirFg&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz",
+    test = YTCompDL(video_url="https://www.youtube.com/watch?v=DyY9Wpfajqo&list=PLJzDTt583BOY28Y996pdRqepIHdysjfiz",
                     output_type="audio")
 
     """

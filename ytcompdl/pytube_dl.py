@@ -22,7 +22,7 @@ class Pytube_Dl(Config):
         self.output_files = []
 
         self.pt = pytube.YouTube(url=self.url, on_progress_callback=on_progress)
-        self.fname = f"{safe_filename(self.pt.title)}.{self.DEF_DL_FILE_EXT}"
+        self.fname = f"{safe_filename(self.pt.title)}.mp4"
 
     @property
     def url(self):
