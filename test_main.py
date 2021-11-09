@@ -1,3 +1,4 @@
+import subprocess
 import unittest
 from ytcompdl.yt_comp_dl import YTCompDL
 
@@ -37,4 +38,6 @@ class TestMain(unittest.TestCase):
         pass
 
     def test_format_opt_metadata(self):
-        pass
+        apply_metadata_cmd = []
+        show_metadata_cmd = ['ffmpeg', '-i', '', '-f', 'ffmetadata', 'test_metadata.txt']
+        subprocess.call(show_metadata_cmd, shell=False)

@@ -5,6 +5,7 @@ import logging
 import tqdm
 from datetime import timedelta
 from collections.abc import Collection
+import ffmpeg
 from ffmpeg import probe
 
 from ytcompdl.utils import timer
@@ -29,7 +30,7 @@ def run_ffmpeg_w_progress(ffmpeg_cmd, desc):
 
     s_elapsed = 0
     print(f"\n{desc}")
-    with tqdm.tqdm(total=file_duration, bar_format=" ↳ |{bar:124}| {percentage:3.0f}%") as pb:
+    with tqdm.tqdm(total=file_duration, bar_format=" ↳ |{bar:124}| {percentage:3.0f}%", leave=True, position=0) as pb:
         while process.poll() is None:
             output = process.stdout.readline().decode("utf-8").strip()
             if "out_time_ms" in output:
@@ -50,9 +51,9 @@ def check_file_paths(source, output):
 
 
 # shell=True is a bad idea.
-async def slice_audio(source, output, duration):
+async def slice_source(source, output, duration):
     """
-    Slice audio source by single duration given.
+    Slice source by single duration given.
     :param source:
     :param output:
     :param duration:
@@ -82,7 +83,7 @@ async def slice_audio(source, output, duration):
 
     subprocess.call(cmd, shell=False)
 
-    return output
+    return shlex.split(esc_output)[0]
 
 
 async def apply_fade(source, output, output_type, fade_end="both", duration=None, seconds=1):
@@ -113,6 +114,10 @@ async def apply_fade(source, output, output_type, fade_end="both", duration=None
     if fade_end.lower() not in Config.ALLOWED_FADE_OPTIONS:
         raise PostProcessError(f"Invalid fade option. ({fade_end})")
 
+    if fade_end.lower() == "none":
+        # if no fade, return source file path.
+        return shlex.split(source)[0]
+
     # https://stackoverflow.com/questions/43818892/fade-out-video-audio-with-ffmpeg
     fade_cmds = {
         "video": {
@@ -123,15 +128,13 @@ async def apply_fade(source, output, output_type, fade_end="both", duration=None
             "both": ['-filter_complex',
                      f'fade=in:st=0:d={seconds}, fade=out:st={track_time.seconds - seconds}:d={seconds}',
                      '-filter_complex',
-                     f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}'],
-            "none": []
+                     f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}']
         },
         "audio": {
             "in": ['-filter_complex', f'afade=in:st=0:d={seconds}'],
             "out": ['-filter_complex', f'afade=out:st=0:d={seconds}'],
             "both": ['-filter_complex',
-                     f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}'],
-            "none": []
+                     f'afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}']
         }
 
     }
@@ -139,6 +142,7 @@ async def apply_fade(source, output, output_type, fade_end="both", duration=None
     cmd = ['ffmpeg', '-hide_banner', '-loglevel', 'error',
            '-i', *shlex.split(esc_source),
            '-map_metadata', '0',
+           '-max_muxing_queue_size', '1024',
            *fade_cmds[output_type.lower()][fade_end.lower()],
            *shlex.split(esc_output)]
 
@@ -153,7 +157,7 @@ async def apply_fade(source, output, output_type, fade_end="both", duration=None
     except (UnicodeEncodeError, UnicodeError):
         logger.info(f"Applied afade: {fade_end} for {seconds} seconds.")
 
-    return output
+    return shlex.split(esc_output)[0]
 
 
 async def apply_metadata(source, output, title, track, album_tags):
@@ -167,23 +171,31 @@ async def apply_metadata(source, output, title, track, album_tags):
 
     # compile album tags
     for tag, tag_val in album_tags.items():
-        tag_str = f'{tag}={tag_val}'
+        tag_str = f'{tag}="{tag_val}"'
         metadata_args.append(f'-metadata')
         metadata_args.append(tag_str)
+
+    # add track if mp3
+    # if title is blank give just generic title
+    metadata_args += [f'-metadata', f'title="{title}"', f'-metadata', f'track={str(track)}']
+    # if ".mp3" in source:
+    #     metadata_args += [f'-metadata', f'title={title}', f'-metadata', f'track={str(track)}']
+    # else:
+    #     metadata_args += [f'-metadata', f'title={title}']
 
     cmd = [f'ffmpeg', '-hide_banner', '-loglevel', 'error',
            '-i', *shlex.split(esc_source),
            '-map_metadata', '0',
            '-c', 'copy',
-           # if title is blank give just generic title
-           f'-metadata', f'title={title}', f'-metadata', f'track={str(track)}',
-           *metadata_args, *shlex.split(esc_output)]
+           *metadata_args,
+           # use arbitrary metadata tags
+           '-movflags', 'use_metadata_tags',
+           *shlex.split(esc_output)]
 
     subprocess.call(cmd, shell=False)
 
     # remove source file
     try:
-
         os.remove(source)
         logger.info(f"Removed {source.encode('utf-8')}")
         logger.info(f"Completed metadata command: {' '.join(cmd)}".encode('utf-8'))
@@ -192,7 +204,7 @@ async def apply_metadata(source, output, title, track, album_tags):
     except (UnicodeEncodeError, UnicodeError):
         logger.info(f"Applied following metadata: {metadata_args[0::2]}")
 
-    return output
+    return shlex.split(esc_output)[0]
 
 
 async def convert_audio(src, output_fname):
@@ -215,6 +227,8 @@ async def convert_audio(src, output_fname):
         logger.error(e)
     except (UnicodeEncodeError, UnicodeError):
         logger.info(f"Converted {src} to {output_fname}.")
+
+    return shlex.split(output_fname)[0]
 
 
 async def merge_codecs(audio, video, output_fname):
@@ -244,3 +258,5 @@ async def merge_codecs(audio, video, output_fname):
         logger.error(e)
     except (UnicodeEncodeError, UnicodeError):
         logger.info(f"Merged {audio_src} and {video_src}.")
+
+    return shlex.split(output_fname)[0]

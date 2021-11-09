@@ -5,15 +5,21 @@ import datetime
 
 
 class Config:
-    LOG_PATH = pathlib.Path(__file__).parents[1].joinpath("logs", "yt_data.log")
-    OUTPUT_PATH = pathlib.Path(__file__).parents[1].joinpath("output")
+    LOG_DIR = pathlib.Path(__file__).parents[1].joinpath("logs")
+    LOG_PATH = pathlib.Path(LOG_DIR).joinpath("yt_data.log")
+    OUTPUT_DIR = pathlib.Path(__file__).parents[1].joinpath("output")
+
+    if not os.path.exists(LOG_DIR):
+        os.mkdir(LOG_DIR)
+    if not os.path.exists(OUTPUT_DIR):
+        os.mkdir(OUTPUT_DIR)
 
     # Max comments to query from.
     MAX_COMMENTS = 1000
     # Minimum number of timestamps a comment has to have to be considered.
     MIN_NUM_TIMESTAMPS = 5
-    # Percent similarity (0-1) to original duration of video.
-    # NOTE: Last timestamp cannot be considered in calculation! This means that comments with longer tracks at end will have reduced overall similarity
+    # Percent similarity (0-1) to original duration of video. NOTE: Last timestamp cannot be considered in
+    # calculation! This means that comments with longer tracks at end will have reduced overall similarity
     LENGTH_THRESHOLD = 0.5
 
     # Regexp to parse strings (id, timestamps, etc.)
@@ -31,3 +37,5 @@ class Config:
     OUTPUT_FILE_EXT = {"audio": "mp3", "video": "mp4"}
     ALLOWED_FADE_OPTIONS = ("in", "out", "both", "none")
     DEF_RESOLUTIONS = ("2160p", "1440p", "1080p", "720p", "480p", "360p", "240p", "144p")
+    # remove original source file
+    RM_SOURCE = True

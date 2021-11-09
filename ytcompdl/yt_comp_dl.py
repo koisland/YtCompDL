@@ -13,7 +13,7 @@ from googleapiclient.discovery import build
 from pytube.helpers import safe_filename
 
 from ytcompdl.pytube_dl import Pytube_Dl
-from ytcompdl.ffmpeg_utils import slice_audio, apply_fade, apply_metadata
+from ytcompdl.ffmpeg_utils import slice_source, apply_fade, apply_metadata
 from ytcompdl.config import Config
 from ytcompdl.utils import timer
 from ytcompdl.errors import YTAPIError, PostProcessError, PyTubeError
@@ -118,7 +118,7 @@ class YTCompDL(Pytube_Dl, Config):
         """
         if self.opt_metadata is None:
             metadata = {'album': self.snippets['title'],
-                        'album_artist': self.channel,
+                        'author': self.channel,
                         'year': self.year_uploaded}
             logger.info(f"No optional album metadata provided. Applying defaults. {metadata.items()}")
             return metadata
@@ -142,7 +142,7 @@ class YTCompDL(Pytube_Dl, Config):
         """
 
         if self.output_type.lower() in self.OUTPUT_FILE_EXT.keys():
-            self.video_path = os.path.join(self.OUTPUT_PATH, f"{self.title}.{self.OUTPUT_FILE_EXT[self.output]}")
+            self.video_path = os.path.join(self.OUTPUT_DIR, f"{self.title}.{self.OUTPUT_FILE_EXT[self.output]}")
         else:
             raise PyTubeError(f"Invalid output category ({self.output_type}).")
 
@@ -153,13 +153,19 @@ class YTCompDL(Pytube_Dl, Config):
             logger.info("Pre-existing file found.")
 
         await self._postprocess()
-        return self.OUTPUT_PATH
+
+        # remove original source file.
+        if self.RM_SOURCE:
+            os.remove(self.video_path)
+
+        return self.OUTPUT_DIR
 
     async def _postprocess(self):
         if self.slice_output and isinstance(self.slice_output, bool):
             # Move to downloader section.
             if self.titles and self.times:
-                folder_path = os.path.join(self.OUTPUT_PATH, self.title)
+                # make subfolder for video segments
+                folder_path = os.path.join(self.OUTPUT_DIR, self.title)
                 if not os.path.exists(folder_path):
                     os.makedirs(folder_path)
 
@@ -176,7 +182,7 @@ class YTCompDL(Pytube_Dl, Config):
                 for num, (title, times) in enumerate(zip(self.titles, self.times), 1):
                     title = safe_filename(title)
                     # ffmpeg can't apply inplace so need intermediate files
-                    slice_path = os.path.join(folder_path, f"x{title}.{self.OUTPUT_FILE_EXT[self.output]}")
+                    slice_path = os.path.join(folder_path, f"{title}.{self.OUTPUT_FILE_EXT[self.output]}")
                     fade_path = os.path.join(folder_path, f"xx{title}.{self.OUTPUT_FILE_EXT[self.output]}")
                     final_output = os.path.join(folder_path, f"{title}.{self.OUTPUT_FILE_EXT[self.output]}")
 
@@ -191,24 +197,24 @@ class YTCompDL(Pytube_Dl, Config):
                     else:
                         title = safe_filename(title)
 
-                    await slice_audio(source=self.video_path, output=slice_path, duration=duration)
+                    slice_path = await slice_source(source=self.video_path, output=slice_path, duration=duration)
 
                     if self.fade_end:
-                        await apply_fade(source=slice_path, output=fade_path, output_type=self.output_type,
-                                         fade_end=self.fade_end, duration=times, seconds=self.fade_time)
+                        fade_path = await apply_fade(source=slice_path, output=fade_path, output_type=self.output_type,
+                                                     fade_end=self.fade_end, duration=times, seconds=self.fade_time)
                     else:
                         fade_path = slice_path
 
                     # can't add metadata inplace
-                    await apply_metadata(source=fade_path, output=final_output,
-                                         title=title, track=num, album_tags=self.metadata)
+                    final_output = await apply_metadata(source=fade_path, output=final_output,
+                                                        title=title, track=num, album_tags=self.metadata)
 
                     self.process_prog_bar.update(1)
 
             else:
                 raise PostProcessError("No timestamps to use to slice.")
         else:
-            logger.info(f"Unsliced {self.title} saved to {self.OUTPUT_PATH}")
+            logger.info(f"Unsliced {self.title} saved to {self.OUTPUT_DIR}")
 
     async def format_timestamps(self):
         """
@@ -427,11 +433,7 @@ class YTCompDL(Pytube_Dl, Config):
         return question
 
     def save_comment(self, chosen_comment):
-        try:
-            timestamp_fname = os.path.join(self.OUTPUT_PATH, f'{self.title}_timestamps.txt')
-        except FileNotFoundError:
-            # If invalid characters in title.
-            timestamp_fname = os.path.join(self.OUTPUT_PATH, f'video_timestamp_{datetime.datetime.now()}.txt')
+        timestamp_fname = os.path.join(self.OUTPUT_DIR, f'{self.title}_timestamps.txt')
         with open(timestamp_fname, 'w', encoding='utf-8') as fobj:
             fobj.write('\n'.join(chosen_comment))
         logger.info(f"Timestamps saved to {os.path.join(os.getcwd(), timestamp_fname)}.")

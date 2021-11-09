@@ -5,7 +5,7 @@ Command-line program to download and segment Youtube videos automatically.
 
 ![](docs/vid_chapters.png)
 
-### Quickstart
+### Usage
 
 ---
 ``` shell
@@ -16,8 +16,7 @@ ffmpeg --version
 pip install -r requirements.txt
 
 # Run script
-python main.py
-
+python main.py -u url -o output 
 ```
 
 ### Options
@@ -35,7 +34,7 @@ python main.py
       * ``` python
         # Default
         {'album': self.snippets['title'], 
-        'album_artist': self.channel,
+        'artist': self.channel,
         'year': self.year_uploaded}
         ```
     * comment (-c)
@@ -65,4 +64,9 @@ python main.py
 ### TO-DO:
 
 ---
-* [ ] **** 
+* [ ] **Testing** 
+  * Add more unittests. 
+* [ ] **Dockerfile**
+  * Write up a dockerfile to handle installation.
+* [ ] **File Extension**
+  * Pretty unlikely since time-consuming.

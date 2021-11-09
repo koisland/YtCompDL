@@ -12,7 +12,6 @@ logger = logging.getLogger(__name__)
 
 
 class Pytube_Dl(Config):
-
     def __init__(self, url, output, res="720p"):
         self.url = url
         self.output = output
@@ -42,7 +41,7 @@ class Pytube_Dl(Config):
 
     async def pytube_dl(self, output=None):
         if output is None:
-            output = self.OUTPUT_PATH
+            output = self.OUTPUT_DIR
         if not os.path.exists(output):
             raise PyTubeError(f"Path ({output}) doesn't exist.")
         if not self.streams:
@@ -65,14 +64,17 @@ class Pytube_Dl(Config):
                 logger.info(f"Downloading {stream.title} as {stream.default_filename}.")
                 self.output_files.append(stream.download(output_path=output))
 
-        # video: merge codecs if source streams were adaptive
+        # video: merge codecs if source streams were adaptive. otherwise, do nothing.
         # audio: convert to mp3
         if self.output == "video" and self.adap_streams:
             logger.debug("Merging audio and video codecs")
-            await merge_codecs(*self.output_files, os.path.join(self.OUTPUT_PATH, self.fname))
-        else:
-            mp3_fname = self.fname.strip(".mp4") + ".mp3"
-            await convert_audio(*self.output_files, os.path.join(self.OUTPUT_PATH, mp3_fname))
+            video_fname = os.path.join(self.OUTPUT_DIR, self.fname)
+            await merge_codecs(*self.output_files, video_fname)
+            return video_fname
+        elif self.output == "audio":
+            audio_fname = self.fname.strip(".mp4") + ".mp3"
+            await convert_audio(*self.output_files, os.path.join(self.OUTPUT_DIR, audio_fname))
+            return audio_fname
 
     def list_available_resolutions(self):
         resolutions = {stream.resolution for stream in self.pt.streams.filter(type="video")}
