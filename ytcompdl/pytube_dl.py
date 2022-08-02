@@ -6,15 +6,26 @@ import logging
 
 from ytcompdl.ffmpeg_utils import merge_codecs, convert_audio
 from ytcompdl.errors import PyTubeError
-from ytcompdl.config import Config
 
 logger = logging.getLogger(__name__)
 
 
-class Pytube_Dl(Config):
-    def __init__(self, url, output, res="720p"):
+class Pytube_Dl:
+    DEF_RESOLUTIONS = (
+        "2160p",
+        "1440p",
+        "1080p",
+        "720p",
+        "480p",
+        "360p",
+        "240p",
+        "144p",
+    )
+
+    def __init__(self, url, output, output_dir, res="720p"):
         self.url = url
         self.output = output
+        self.output_dir = output_dir
         self.res = res
 
         self.adap_streams = False
@@ -23,32 +34,13 @@ class Pytube_Dl(Config):
         self.pt = pytube.YouTube(url=self.url, on_progress_callback=on_progress)
         self.fname = f"{safe_filename(self.pt.title)}.mp4"
 
-    @property
-    def url(self):
-        return self._url
-
-    @url.setter
-    def url(self, url):
-        self._url = url
-
-    @property
-    def output(self):
-        return self._output
-
-    @output.setter
-    def output(self, output):
-        self._output = output
-
-    async def pytube_dl(self, output=None):
+    def pytube_dl(self, output=None):
         if output is None:
-            output = self.OUTPUT_DIR
+            output = self.output_dir
         if not os.path.exists(output):
             raise PyTubeError(f"Path ({output}) doesn't exist.")
         if not self.streams:
             raise PyTubeError("No streams to download.")
-
-        # Setup prog bar and have contain filesize of all desired streams.
-        print(f'Downloading "{self.url}" as "{self.fname}".')
 
         for stream in self.streams:
             # prepend output type to prevent overwriting files when downloading video
@@ -57,9 +49,19 @@ class Pytube_Dl(Config):
                     categ = "video_"
                 else:
                     categ = "audio_"
-                logger.info(f"Downloading {categ.strip('_')} stream of {stream.title} "
-                            f"as {categ + stream.default_filename}.")
-                self.output_files.append(stream.download(output_path=output, filename_prefix=categ))
+
+                # Setup prog bar and have contain filesize of all desired streams.
+                print(
+                    f'Downloading {categ.strip("_")} of "{self.url}" as "{self.fname}".'
+                )
+
+                logger.info(
+                    f"Downloading {categ.strip('_')} stream of {stream.title} "
+                    f"as {categ + stream.default_filename}."
+                )
+                self.output_files.append(
+                    stream.download(output_path=output, filename_prefix=categ)
+                )
             else:
                 logger.info(f"Downloading {stream.title} as {stream.default_filename}.")
                 self.output_files.append(stream.download(output_path=output))
@@ -67,17 +69,21 @@ class Pytube_Dl(Config):
         # video: merge codecs if source streams were adaptive. otherwise, do nothing.
         # audio: convert to mp3
         if self.output == "video" and self.adap_streams:
-            logger.debug("Merging audio and video codecs")
-            video_fname = os.path.join(self.OUTPUT_DIR, self.fname)
-            await merge_codecs(*self.output_files, video_fname)
+            logger.debug("Merging audio and video codecs.")
+            video_fname = os.path.join(self.output_dir, self.fname)
+            merge_codecs(*self.output_files, video_fname)
             return video_fname
         elif self.output == "audio":
             audio_fname = self.fname.strip(".mp4") + ".mp3"
-            await convert_audio(*self.output_files, os.path.join(self.OUTPUT_DIR, audio_fname))
+            convert_audio(
+                *self.output_files, os.path.join(self.output_dir, audio_fname)
+            )
             return audio_fname
 
     def list_available_resolutions(self):
-        resolutions = {stream.resolution for stream in self.pt.streams.filter(type="video")}
+        resolutions = {
+            stream.resolution for stream in self.pt.streams.filter(type="video")
+        }
         sorted_res = sorted(resolutions, key=lambda x: int(x.strip("p")))
         return sorted_res
 
@@ -96,10 +102,13 @@ class Pytube_Dl(Config):
                     yield video_stream
                     yield audio_stream
                 else:
-                    logger.info(f"No video stream found with desired resolution: {self.res}")
+                    logger.info(
+                        f"No video stream found with desired resolution: {self.res}"
+                    )
                     prog_stream = self.pt.streams.get_highest_resolution()
                     logger.info(
-                        f"Defaulting to progressive stream with highest resolution ({prog_stream.resolution}).")
+                        f"Defaulting to progressive stream with highest resolution ({prog_stream.resolution})."
+                    )
                     yield prog_stream
             else:
                 raise PyTubeError(f"Invalid resolution ({self.res}).")

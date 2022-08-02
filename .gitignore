@@ -131,7 +131,3 @@ dmypy.json
 
 # output
 output/
-
-# TODO: Chrome/Firefox Extension
-ytcompdl_ext/
-Dockerfile
