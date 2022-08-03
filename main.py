@@ -3,7 +3,7 @@ import pathlib
 from ytcompdl.yt_comp_dl import YTCompDL
 
 """
-command-line version
+YTCompDL
 """
 
 if __name__ == "__main__":
@@ -12,9 +12,20 @@ if __name__ == "__main__":
     )
 
     # Required arguments.
-    ap.add_argument("-u", "--url", required=True, help="Youtube URL")
+    ap.add_argument("-u", "--url", required=True, type=str, help="Youtube URL")
     ap.add_argument(
-        "-o", "--output_type", required=True, help="Desired output (audio/video)"
+        "-o",
+        "--output_type",
+        required=True,
+        type=str,
+        help="Desired output (audio/video)",
+    )
+    ap.add_argument(
+        "-x",
+        "--regex_cfg",
+        required=True,
+        type=str,
+        help="Path to regex config file (.yaml)",
     )
 
     # Optional arguments.
@@ -22,6 +33,7 @@ if __name__ == "__main__":
         "-d",
         "--directory",
         default=pathlib.Path(__file__).parents[0].joinpath("output"),
+        type=str,
         help="Output directory.",
     )
     ap.add_argument(
@@ -32,20 +44,27 @@ if __name__ == "__main__":
         help="Use n cores to process tracks in parallel.",
     )
     ap.add_argument(
-        "-r", "--resolution", help="Desired resolution (video only)", default="720p"
+        "-r",
+        "--resolution",
+        help="Desired resolution (video only)",
+        type=str,
+        default="720p",
     )
     ap.add_argument(
-        "-m", "--metadata", help="Path to optional metadata (.json)", default=None
+        "-m", "--metadata", type=str, help="Path to optional metadata (.json)"
     )
     ap.add_argument("-c", "--comment", help="Select comment.", action="store_true")
     ap.add_argument(
         "-t", "--timestamps", help="Save timestamps as .txt file.", action="store_true"
     )
     ap.add_argument("-s", "--slice", help="Slice output.", action="store_true")
-    ap.add_argument("-f", "--fade", help="Fade (in/out/both/none)", default="both")
-    ap.add_argument("-ft", "--fade_time", help="Fade time in seconds.", default=0.5)
+    ap.add_argument(
+        "-f", "--fade", type=str, help="Fade (in/out/both/none)", default="both"
+    )
+    ap.add_argument(
+        "-ft", "--fade_time", type=float, help="Fade time in seconds.", default=0.5
+    )
 
-    # dl arguments.
     args = vars(ap.parse_args())
 
     # Make directory

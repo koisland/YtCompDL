@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import yaml
 import pathlib
 import datetime
 import pprint
@@ -32,16 +33,6 @@ class YTCompDL(Pytube_Dl):
     # Regexp to parse strings (id, timestamps, etc.)
     # Works only if text is split line-by-line.
     YT_ID_REGEX = re.compile(r"(?<=v=)(.*?)(?=(?:&|$))")
-    YT_TIME_REGEX = r"\d{1,2}:?\d*:\d{2}"
-    YT_IGN_REGEX = (
-        r"―|―|-|\s|\[|\]"  # Spacer characters between time or titles to ignore.
-    )
-    YT_START_TIMESTAMPS_REGEX = re.compile(
-        f"(.*?)(?:{YT_IGN_REGEX})*({YT_TIME_REGEX})(?:{YT_IGN_REGEX})*(.*)"
-    )  # Can be name - time - name
-    YT_DUR_TIMESTAMPS_REGEX = re.compile(
-        f"(.*?)(?:{YT_IGN_REGEX})*({YT_TIME_REGEX})(?:{YT_IGN_REGEX})*({YT_TIME_REGEX})(?:{YT_IGN_REGEX})*(.*)"
-    )
 
     # Max comments to query from.
     MAX_COMMENTS = 1000
@@ -62,6 +53,7 @@ class YTCompDL(Pytube_Dl):
         self,
         video_url: str,
         output_type: str,
+        regex_config: str,
         output_dir: pathlib.Path,
         n_processes: int = 4,
         res: str = "720p",
@@ -77,18 +69,27 @@ class YTCompDL(Pytube_Dl):
         :param output_type: Desired output from video. (string - "audio", "video")
         :param res: Desired resolution (if video_ouput="video"). (string)
         :param opt_metadata: Optional album metadata (dict)
+        :param choose_comment: (bool)
+        :param save_timestamps: (bool)
         :param slice_output: Slice output by timestamps. (bool)
         :param fade_end: Fade an end of the output. (string)
         :param fade_time: Time to fade audio or video. (float)
         Titles and track numbers applied by default.
         """
-        available_cores = os.cpu_count()
         self.video_url = video_url
         self.output_type = output_type
         self.output_dir = output_dir
+
+        # Check available cores
+        available_cores = os.cpu_count()
         self.n_processes = (
             available_cores if available_cores < n_processes else n_processes
         )
+
+        # Load regex patterns
+        self.regex_config = regex_config
+        self.load_config_regex()
+
         self.opt_metadata = opt_metadata
         self.choose_comment = choose_comment
         self.save_timestamps = save_timestamps
@@ -126,6 +127,60 @@ class YTCompDL(Pytube_Dl):
 
         # Place at the end to allow custom errors if invalid args.
         super().__init__(video_url, output_type, output_dir, res)
+
+    def load_config_regex(self):
+        """
+        Load regex patterns from config file by setting instance vars.
+        """
+        with open(self.regex_config, "r") as yaml_file:
+            try:
+                regex_patterns = yaml.safe_load(yaml_file)
+            except yaml.YAMLError:
+                raise Exception(f"Invalid yaml file. {self.regex_config}")
+
+        # Check that all patterns exist.
+        expected_patterns = [
+            "ignored_spacers",
+            "time",
+            "start_timestamp",
+            "duration_timestamp",
+        ]
+        if any(pattern not in expected_patterns for pattern in regex_patterns.keys()):
+            raise ValueError(
+                f"Missing one or more expected patterns. {expected_patterns}"
+            )
+
+        # Check that types are correct.
+        for regex_name, pattern in regex_patterns.items():
+            if regex_name == "ignored_spacers" and isinstance(pattern, list):
+                if any(isinstance(ign_char, str) is False for ign_char in pattern):
+                    raise ValueError("Invalid character in ignored_spacers.")
+            elif not isinstance(pattern, str):
+                raise ValueError(
+                    f"Regular expression pattern for {regex_name} is invalid. {pattern}"
+                )
+
+        self.YT_TIME_REGEX = regex_patterns["time"]
+        try:
+            self.YT_IGN_REGEX = "|".join(
+                f"\\{char}" for char in regex_patterns["ignored_spacers"]
+            )
+        except TypeError:
+            logging.debug(
+                'No ignored characters provided for spacer. Using "" as default.'
+            )
+            self.YT_IGN_REGEX = ""
+
+        self.YT_START_TIMESTAMPS_REGEX = re.compile(
+            regex_patterns["start_timestamp"].format(
+                ignored_spacers=self.YT_IGN_REGEX, time=self.YT_TIME_REGEX
+            )
+        )
+        self.YT_DUR_TIMESTAMPS_REGEX = re.compile(
+            regex_patterns["duration_timestamp"].format(
+                ignored_spacers=self.YT_IGN_REGEX, time=self.YT_TIME_REGEX
+            )
+        )
 
     @property
     def title(self) -> str:
@@ -245,7 +300,7 @@ class YTCompDL(Pytube_Dl):
         self._postprocess()
 
         # remove original source file.
-        if self.RM_SOURCE:
+        if self.RM_SOURCE and self.slice_output:
             os.remove(self.video_path)
 
         return self.output_dir

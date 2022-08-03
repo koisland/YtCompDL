@@ -1,0 +1,13 @@
+ignored_spacers: # Optional
+  - "―"
+  - "―"
+  - "-"
+  - "\\s"
+  - "["
+  - "]"
+
+time: "\\d{1,2}:?\\d*:\\d{2}" # Optional
+
+# Required
+start_timestamp: "(.*?)(?:{ignored_spacers})*({time})(?:{ignored_spacers})*(.*)"
+duration_timestamp: "(.*?)(?:{ignored_spacers})*({time})(?:{ignored_spacers})*({time})(?:{ignored_spacers})*(.*)"
