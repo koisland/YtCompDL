@@ -81,10 +81,12 @@ class YTCompDL(Pytube_Dl):
         self.output_dir = output_dir
 
         # Check available cores
-        available_cores = os.cpu_count()
-        self.n_processes = (
-            available_cores if available_cores < n_processes else n_processes
-        )
+        if available_cores := os.cpu_count():
+            self.n_processes = (
+                available_cores if available_cores < n_processes else n_processes
+            )
+        else:
+            raise Exception("No cores available.")
 
         # Load regex patterns
         self.regex_config = regex_config
@@ -316,7 +318,7 @@ class YTCompDL(Pytube_Dl):
         fade_end: str,
         fade_time: int,
         metadata: dict,
-    ) -> None:
+    ) -> str:
         """
         Process a single track.
         instance var needs to be picklable so instead pass vars
@@ -336,7 +338,7 @@ class YTCompDL(Pytube_Dl):
         final_output = output_dir.joinpath(f"{safe_title}.{ext}")
 
         if final_output.exists():
-            return
+            return str(final_output)
 
         # convert timedelta times to seconds (int).
         duration = [time.seconds for time in times]
@@ -356,7 +358,7 @@ class YTCompDL(Pytube_Dl):
                 seconds=float(fade_time),
             )
         else:
-            fade_path = str(slice_path)
+            fade_path = slice_path
 
         # can't add metadata inplace
         final_output = apply_metadata(
@@ -366,7 +368,8 @@ class YTCompDL(Pytube_Dl):
             track=num,
             album_tags=metadata,
         )
-        return final_output
+
+        return str(final_output)
 
     def _postprocess(self):
         if not self.slice_output:

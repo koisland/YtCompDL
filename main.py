@@ -2,9 +2,6 @@ import argparse
 import pathlib
 from ytcompdl.yt_comp_dl import YTCompDL
 
-"""
-YTCompDL
-"""
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(
@@ -67,13 +64,13 @@ if __name__ == "__main__":
 
     args = vars(ap.parse_args())
 
-    # Make directory
+    # Make output directory.
     if isinstance(args["directory"], str):
-        args["directory"] = pathlib.Path(str)
+        args["directory"] = pathlib.Path(args["directory"])
 
     if not args["directory"].exists():
         args["directory"].mkdir(parents=True, exist_ok=True)
 
     dl = YTCompDL(*args.values())
-    # print(dl.timestamps)
+
     dl.download()
