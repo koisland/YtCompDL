@@ -5,7 +5,6 @@ import subprocess
 import logging
 import functools
 import tqdm
-from datetime import timedelta
 from ffmpeg import probe
 from typing import List, Dict, Tuple, Union, Callable
 from ytcompdl.errors import PostProcessError
@@ -17,10 +16,15 @@ logger = logging.getLogger(__name__)
 def run_ffmpeg_w_progress(ffmpeg_cmd: List[str], desc: str) -> None:
     """
     Run ffmpeg commands with progress bar.
+    :param ffmpeg_cmd: ffmpeg cmd as list of str.
+    :param desc: Description to print before progress bar.
+
+    :return: None
     """
     index_of_filepath = ffmpeg_cmd.index("-i") + 1
     filepath = ffmpeg_cmd[index_of_filepath]
 
+    # Find duration of file to set progress bar denom.
     file_duration = float(probe(filepath)["format"]["duration"])
     file_duration = int(file_duration)
 
@@ -29,14 +33,20 @@ def run_ffmpeg_w_progress(ffmpeg_cmd: List[str], desc: str) -> None:
         stdout=subprocess.PIPE,
     )
 
+    # Match pytube max width of progressbar
+    # https://github.com/pytube/pytube/blob/master/pytube/cli.py#L230
+    prog_bar_len = shutil.get_terminal_size().columns
+    max_width = int(prog_bar_len * 0.55)
+
     s_elapsed = 0
     print(f"\n{desc}")
     with tqdm.tqdm(
         total=file_duration,
-        bar_format=" ↳ |{bar:114}| {percentage:3.0f}%",
+        bar_format=f" ↳ |{{bar:{max_width}}}| {{percentage:3.0f}}.0%",
         leave=True,
         position=0,
     ) as pb:
+        # Check if process is still running.
         while process.poll() is None:
             if process.stdout:
                 output = process.stdout.readline().decode("utf-8").strip()
@@ -48,7 +58,14 @@ def run_ffmpeg_w_progress(ffmpeg_cmd: List[str], desc: str) -> None:
                     s_elapsed = secs
 
 
-def check_ffmpeg(func) -> Callable:
+def check_ffmpeg(func: Callable) -> Callable:
+    """
+    Wrapper function to check if ffmpeg exists as an excutable on os.
+    :param func: function to wrap
+
+    :return: Wrapped function.
+    """
+
     @functools.wraps(func)
     def inner_func(*args, **kwargs):
         if shutil.which("ffmpeg") is None:
@@ -59,38 +76,22 @@ def check_ffmpeg(func) -> Callable:
     return inner_func
 
 
-def check_file_paths(source: str, output: str) -> None:
-    """
-    Check that source file exists and that out
-    """
-    if not os.path.exists(source):
-        raise PostProcessError("Invalid file source.")
-    if os.path.exists(output):
-        # remove incomplete intermediate file if output exists.
-        os.remove(source)
-        raise PostProcessError("Invalid file output path. Already exists.")
-
-
 @check_ffmpeg
-def slice_source(
-    source: str, output: str, duration: Tuple[timedelta, timedelta]
-) -> str:
+def slice_source(input_fname: str, output_fname: str, duration: Tuple[int, int]) -> str:
     """
     Slice source by single duration given.
-    :param source: input source file
-    :param output: output file
+    :param input_fname: input source file
+    :param output_fname: output file
     :param duration: durations start and end timestamp
     :return: escaped output file path
     """
-    check_file_paths(source, output)
-
     if not isinstance(duration, tuple) and all(
-        isinstance(time, timedelta) for time in duration
+        isinstance(time, int) for time in duration
     ):
         raise PostProcessError("Invalid duration times.")
 
-    esc_source = shlex.quote(source)
-    esc_output = shlex.quote(output)
+    input_fname_qt = shlex.quote(input_fname)
+    output_fname_qt = shlex.quote(output_fname)
 
     # ss arg for position, c for codec/copy
     # -map_metadata 0 copy metadata from source to output
@@ -100,7 +101,7 @@ def slice_source(
         "-loglevel",
         "error",
         "-i",
-        *shlex.split(esc_source),
+        *shlex.split(input_fname_qt),
         "-map_metadata",
         "0",
         "-ss",
@@ -109,7 +110,7 @@ def slice_source(
         f"{duration[1]}",
         "-c",
         "copy",
-        *shlex.split(esc_output),
+        *shlex.split(output_fname_qt),
     ]
     try:
         logger.info(f"Running slice command: {' '.join(cmd)}")
@@ -117,9 +118,9 @@ def slice_source(
         # if contains characters that can't be encoded.
         logger.info(f"Sliced source from {duration[0]}-{duration[1]}")
 
-    subprocess.call(cmd, shell=False)
+    subprocess.run(cmd, shell=False)
 
-    return shlex.split(esc_output)[0]
+    return shlex.split(output_fname_qt)[0]
 
 
 @check_ffmpeg
@@ -127,10 +128,7 @@ def apply_fade(
     input_fname: str,
     output_fname: str,
     fade_end: str = "both",
-    duration: Tuple[timedelta, timedelta] = (
-        timedelta(seconds=0),
-        timedelta(seconds=0),
-    ),
+    duration: Tuple[int, int] = (0, 0),
     seconds: Union[int, float] = 1,
     remove_original: bool = True,
 ) -> str:
@@ -145,18 +143,15 @@ def apply_fade(
 
     :return:
     """
-
-    check_file_paths(input_fname, output_fname)
-
     input_fname_qt = shlex.quote(input_fname)
     output_fname_qt = shlex.quote(output_fname)
 
-    if duration == (timedelta(seconds=0), timedelta(seconds=0)):
+    if duration == (0, 0):
         raise PostProcessError("No track duration given.")
     elif any(
         [
             isinstance(duration, tuple) is False,
-            all(isinstance(dur, timedelta) for dur in duration) is False,
+            all(isinstance(dur, int) for dur in duration) is False,
             len(duration) != 2,
         ]
     ):
@@ -165,9 +160,9 @@ def apply_fade(
         )
     else:
         track_time = duration[1] - duration[0]
-        if seconds > track_time.seconds:
+        if seconds > track_time:
             raise PostProcessError(
-                f"Invalid fade time. Longer than track length. ({seconds} > {track_time.seconds})"
+                f"Invalid fade time. Longer than track length. ({seconds} > {track_time})"
             )
     if not (isinstance(seconds, int) or isinstance(seconds, float)):
         raise PostProcessError(
@@ -178,7 +173,7 @@ def apply_fade(
 
     if fade_end.lower() == "none":
         # if no fade, return source file path.
-        return shlex.split(input_fname)[0]
+        return shlex.split(input_fname_qt)[0]
 
     # https://stackoverflow.com/questions/43818892/fade-out-video-audio-with-ffmpeg
     fade_cmds = {
@@ -197,9 +192,9 @@ def apply_fade(
             ],
             "both": [
                 "-filter_complex",
-                f"fade=in:st=0:d={seconds}, fade=out:st={track_time.seconds - seconds}:d={seconds}",
+                f"fade=in:st=0:d={seconds}, fade=out:st={track_time - seconds}:d={seconds}",
                 "-filter_complex",
-                f"afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}",
+                f"afade=in:st=0:d={seconds}, afade=out:st={track_time - seconds}:d={seconds}",
             ],
         },
         "audio": {
@@ -207,7 +202,7 @@ def apply_fade(
             "out": ["-filter_complex", f"afade=out:st=0:d={seconds}"],
             "both": [
                 "-filter_complex",
-                f"afade=in:st=0:d={seconds}, afade=out:st={track_time.seconds - seconds}:d={seconds}",
+                f"afade=in:st=0:d={seconds}, afade=out:st={track_time - seconds}:d={seconds}",
             ],
         },
     }
@@ -228,7 +223,7 @@ def apply_fade(
         *shlex.split(output_fname_qt),
     ]
 
-    subprocess.call(cmd, shell=False)
+    subprocess.run(cmd, shell=False)
 
     try:
         if remove_original:
@@ -263,8 +258,6 @@ def apply_metadata(
 
     :return: output file path
     """
-    check_file_paths(input_fname, output_fname)
-
     # source file to remove after metadata is applied.
     input_fname_qt = shlex.quote(input_fname)
     output_fname_qt = shlex.quote(output_fname)
@@ -273,15 +266,17 @@ def apply_metadata(
 
     # compile album tags
     for tag, tag_val in album_tags.items():
-        tag_str = f'{tag}="{tag_val}"'
+        tag_value_qt = shlex.split(shlex.quote(tag_val))[0]
+        tag_str = f"{tag}={tag_value_qt}"
         metadata_args.append("-metadata")
         metadata_args.append(tag_str)
 
-    # add track if mp3
-    # if title is blank give just generic title
+    # Add track if mp3
+    # If title is blank give just generic title.
+    # Title should already be escaped and safe at this point.
     metadata_args += [
         "-metadata",
-        f'title="{title}"',
+        f"title={title}",
         "-metadata",
         f"track={str(track)}",
     ]
@@ -293,18 +288,13 @@ def apply_metadata(
         "error",
         "-i",
         *shlex.split(input_fname_qt),
-        "-map_metadata",
-        "0",
         "-c",
         "copy",
         *metadata_args,
-        # use arbitrary metadata tags
-        "-movflags",
-        "use_metadata_tags",
         *shlex.split(output_fname_qt),
     ]
 
-    subprocess.call(cmd, shell=False)
+    subprocess.run(cmd, shell=False)
 
     try:
         if remove_original:
@@ -324,7 +314,7 @@ def convert_audio(
     input_video_fname: str, output_audio_fname: str, remove_original: bool = True
 ) -> str:
     """
-    Convert video to only audio file showing progressbar.
+    Convert video/multiple stream file to only audio file showing progressbar.
     :params input_video_fname: input video file
     :params output_audio_fname: output file with merged codecs.
     :param remove_original: remove original file.
@@ -358,7 +348,7 @@ def convert_audio(
     except OSError as e:
         logger.error(f"Unable to remove file due to: {e}")
     except (UnicodeEncodeError, UnicodeError):
-        logger.info(f"Converted {input_video_fname_qt} to {output_video_fname_qt}.")
+        logger.info(f"Converted {input_video_fname} to {output_audio_fname}.")
 
     return shlex.split(output_video_fname_qt)[0]
 
@@ -399,7 +389,7 @@ def merge_codecs(
     ]
 
     run_ffmpeg_w_progress(
-        cmd, desc=f"Merging {input_audio_fname} and {input_video_fname}."
+        cmd, desc=f"Merging {input_audio_fname_qt} and {input_video_fname_qt}."
     )
 
     try:

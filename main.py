@@ -61,6 +61,12 @@ if __name__ == "__main__":
     ap.add_argument(
         "-ft", "--fade_time", type=float, help="Fade time in seconds.", default=0.5
     )
+    ap.add_argument(
+        "-rm",
+        "--rm_src",
+        action="store_true",
+        help="Remove downloaded source file after processing.",
+    )
 
     args = vars(ap.parse_args())
 

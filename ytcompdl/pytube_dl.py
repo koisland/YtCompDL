@@ -1,8 +1,8 @@
-import os
-import pytube
-from pytube.cli import on_progress
-from pytube.helpers import safe_filename
 import logging
+import pathlib
+import pytube
+from typing import Dict
+from pytube.cli import on_progress
 
 from ytcompdl.ffmpeg_utils import merge_codecs, convert_audio
 from ytcompdl.errors import PyTubeError
@@ -22,63 +22,64 @@ class Pytube_Dl:
         "144p",
     )
 
-    def __init__(self, url, output, output_dir, res="720p"):
+    def __init__(self, url: str, res: str = "720p") -> None:
+
         self.url = url
-        self.output = output
-        self.output_dir = output_dir
         self.res = res
 
-        self.adap_streams = False
-        self.output_files = []
+        self.adap_streams: bool = False
+        self.output_files: Dict[str, str] = {}
 
         self.pt = pytube.YouTube(url=self.url, on_progress_callback=on_progress)
-        self.fname = f"{safe_filename(self.pt.title)}.mp4"
 
-    def pytube_dl(self, output=None):
-        if output is None:
-            output = self.output_dir
-        if not os.path.exists(output):
-            raise PyTubeError(f"Path ({output}) doesn't exist.")
-        if not self.streams:
-            raise PyTubeError("No streams to download.")
+    def pytube_dl(self, output: str):
+        """
+        Download video with pytube.
+        :param output: output path. If none, default to output directory.
+        """
+        output_dir = pathlib.Path(output).parents[0]
 
-        for stream in self.streams:
-            # prepend output type to prevent overwriting files when downloading video
-            if self.output == "video" and self.adap_streams:
-                if stream.includes_video_track:
-                    categ = "video_"
-                else:
-                    categ = "audio_"
+        filename = pathlib.Path(output).name
 
-                # Setup prog bar and have contain filesize of all desired streams.
-                print(
-                    f'Downloading {categ.strip("_")} of "{self.url}" as "{self.fname}".'
-                )
+        output_type = "audio" if output.endswith(".mp3") else "video"
+
+        for stream in self.streams(output_type):
+            if output_type == "video" and self.adap_streams:
+                # Add output type to prevent overwriting files when downloading video
+                categ = "video" if stream.includes_video_track else "audio"
+                print(f'Downloading {categ} of "{self.url}" as "{categ}_{filename}".')
 
                 logger.info(
-                    f"Downloading {categ.strip('_')} stream of {stream.title} "
-                    f"as {categ + stream.default_filename}."
+                    f"Downloading {categ} stream of {stream.title} "
+                    f"as {categ}_{stream.default_filename}."
                 )
-                self.output_files.append(
-                    stream.download(output_path=output, filename_prefix=categ)
+                self.output_files[categ] = stream.download(
+                    output_path=output_dir,
+                    filename=filename,
+                    filename_prefix=f"{categ}_",
                 )
-            else:
-                logger.info(f"Downloading {stream.title} as {stream.default_filename}.")
-                self.output_files.append(stream.download(output_path=output))
 
-        # video: merge codecs if source streams were adaptive. otherwise, do nothing.
-        # audio: convert to mp3
-        if self.output == "video" and self.adap_streams:
+            else:
+                print(f'Downloading audio of "{self.url}" as "audio_{output}".')
+                logger.info(f"Downloading {stream.title} as {stream.default_filename}.")
+                self.output_files["audio"] = stream.download(
+                    output_path=output_dir, filename=filename, filename_prefix="audio_"
+                )
+
+        if len(self.output_files) == 0:
+            raise PyTubeError("No streams downloaded.")
+
+        # Video: Merge codecs if source streams were adaptive. Otherwise, do nothing.
+        # Audio: Convert to single audio stream mp3.
+        if output_type == "video" and self.adap_streams:
             logger.debug("Merging audio and video codecs.")
-            video_fname = os.path.join(self.output_dir, self.fname)
-            merge_codecs(*self.output_files, video_fname)
-            return video_fname
-        elif self.output == "audio":
-            audio_fname = self.fname.strip(".mp4") + ".mp3"
-            convert_audio(
-                *self.output_files, os.path.join(self.output_dir, audio_fname)
-            )
-            return audio_fname
+
+            merge_codecs(self.output_files["audio"], self.output_files["video"], output)
+
+        elif output_type == "audio":
+            convert_audio(self.output_files["audio"], output)
+
+        return output
 
     def list_available_resolutions(self):
         resolutions = {
@@ -87,18 +88,26 @@ class Pytube_Dl:
         sorted_res = sorted(resolutions, key=lambda x: int(x.strip("p")))
         return sorted_res
 
-    @property
-    def streams(self):
+    def streams(self, output_type: str):
+        """
+        Get available audio or video streams for a video.
+        - progressive is lower quality but includes both audio and video
+        - adaptive is best quality but is only video so must merge audio stream
+        :param output_type: Output file type.
+
+        :return: Generator of streams.
+        """
         # both outputs will need the audio stream. audio stream output is mp4a
         audio_stream = self.pt.streams.get_audio_only()
 
-        if self.output == "audio":
+        if output_type == "audio":
             yield audio_stream
-        elif self.output == "video":
+        else:
             if self.res in self.DEF_RESOLUTIONS:
                 if video_stream := self.pt.streams.filter(res=self.res).first():
                     # Will need to know to merge adaptive streams later.
                     self.adap_streams = True
+
                     yield video_stream
                     yield audio_stream
                 else:
@@ -112,8 +121,6 @@ class Pytube_Dl:
                     yield prog_stream
             else:
                 raise PyTubeError(f"Invalid resolution ({self.res}).")
-        else:
-            raise PyTubeError(f"Invalid format ({self.output}).")
 
     @property
     def stream_filesize(self):

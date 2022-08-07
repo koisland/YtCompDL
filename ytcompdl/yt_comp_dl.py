@@ -46,9 +46,6 @@ class YTCompDL(Pytube_Dl):
     ALLOWED_TAGS = ("album", "composer", "genre", "artist", "album_artist", "date")
     OUTPUT_FILE_EXT = {"audio": "mp3", "video": "mp4"}
 
-    # remove original source file
-    RM_SOURCE = True
-
     def __init__(
         self,
         video_url: str,
@@ -63,6 +60,7 @@ class YTCompDL(Pytube_Dl):
         slice_output: bool = True,
         fade_end: str = "both",
         fade_time: float = 0.5,
+        rm_src: bool = False,
     ):
         """
         :param video_url: Youtube video url. (string)
@@ -98,6 +96,7 @@ class YTCompDL(Pytube_Dl):
         self.slice_output = slice_output
         self.fade_end = fade_end
         self.fade_time = fade_time
+        self.rm_src = rm_src
 
         if not os.environ.get("YT_API_KEY"):
             raise YTAPIError(
@@ -124,13 +123,10 @@ class YTCompDL(Pytube_Dl):
         # timestamps
         self.titles, self.times = self.format_timestamps()
 
-        # download instance vars
-        self.video_path = None
-
         # Place at the end to allow custom errors if invalid args.
-        super().__init__(video_url, output_type, output_dir, res)
+        super().__init__(video_url, res)
 
-    def load_config_regex(self):
+    def load_config_regex(self) -> None:
         """
         Load regex patterns from config file by setting instance vars.
         """
@@ -218,7 +214,7 @@ class YTCompDL(Pytube_Dl):
         return year_uploaded
 
     @property
-    def video_id(self):
+    def video_id(self) -> str:
         """
         Video id from url.
         :return: id_search (string)
@@ -231,7 +227,7 @@ class YTCompDL(Pytube_Dl):
             )
 
     @property
-    def duration(self):
+    def duration(self) -> datetime.timedelta:
         """
         Converts iso8601 duration string into duration as datetime timedelta .
         :return: duration (datetime timedelta)
@@ -249,7 +245,7 @@ class YTCompDL(Pytube_Dl):
             raise YTAPIError("Unable to parse ISO8601 duration string.")
 
     @property
-    def metadata(self):
+    def metadata(self) -> dict:
         """
         Metadata from video information to add to media.
         If opt_metadata included and validated, use instead.
@@ -258,7 +254,7 @@ class YTCompDL(Pytube_Dl):
         if self.opt_metadata is None:
             metadata = {
                 "album": self.snippets["title"],
-                "author": self.channel,
+                "album_artist": self.channel,
                 "year": self.year_uploaded,
             }
             logger.info(
@@ -278,34 +274,36 @@ class YTCompDL(Pytube_Dl):
             else:
                 raise YTAPIError("Invalid album metadata provided.")
 
-    def download(self):
+    def download(self) -> None:
         """
         Download YT video provided by url and process using timestamps.
-        :return: Output path.
+        :return: None
         """
 
         if self.output_type.lower() in self.OUTPUT_FILE_EXT.keys():
-            self.video_path = os.path.join(
-                self.output_dir, f"{self.title}.{self.OUTPUT_FILE_EXT[self.output]}"
+            video_path = os.path.join(
+                self.output_dir,
+                f"{self.title}.{self.OUTPUT_FILE_EXT[self.output_type.lower()]}",
             )
         else:
             raise PyTubeError(f"Invalid output category ({self.output_type}).")
 
-        if not os.path.exists(self.video_path):
+        if not os.path.exists(video_path):
             logger.info(
                 f"Downloading {self.output_type.lower()} for {self.snippets['title']}."
             )
-            self.pytube_dl()
+            self.pytube_dl(video_path)
         else:
             logger.info("Pre-existing file found.")
 
-        self._postprocess()
+        self._postprocess(video_path)
 
         # remove original source file.
-        if self.RM_SOURCE and self.slice_output:
-            os.remove(self.video_path)
-
-        return self.output_dir
+        if self.rm_src and self.slice_output:
+            try:
+                os.remove(video_path)
+            except FileNotFoundError:
+                pass
 
     @staticmethod
     def _postprocess_track(
@@ -332,46 +330,45 @@ class YTCompDL(Pytube_Dl):
 
         ext = "mp3" if output_type == "audio" else "mp4"
 
-        # ffmpeg can't apply inplace so need intermediate files
-        slice_path = output_dir.joinpath(f"{safe_title}.{ext}")
-        fade_path = output_dir.joinpath(f"xx{safe_title}.{ext}")
+        # ffmpeg can't apply inplace so need intermediate files with unique names.
+        slice_path = output_dir.joinpath(f"{hash(title)}_{safe_title}.{ext}")
+        fade_path = output_dir.joinpath(f"{hash(title + 'fade')}_{safe_title}.{ext}")
         final_output = output_dir.joinpath(f"{safe_title}.{ext}")
 
         if final_output.exists():
             return str(final_output)
 
         # convert timedelta times to seconds (int).
-        duration = [time.seconds for time in times]
+        duration = tuple(int(time.seconds) for time in times)
 
         if not slice_path.exists():
             slice_path = slice_source(
-                source=video_path, output=str(slice_path), duration=duration
+                input_fname=video_path, output_fname=str(slice_path), duration=duration
             )
 
-        if fade_end and not fade_path.exists():
+        if not fade_path.exists():
             fade_path = apply_fade(
-                source=str(slice_path),
-                output=str(fade_path),
-                output_type=output_type,
+                input_fname=str(slice_path),
+                output_fname=str(fade_path),
                 fade_end=fade_end,
-                duration=times,
+                duration=duration,
                 seconds=float(fade_time),
+                remove_original=True,
             )
-        else:
-            fade_path = slice_path
 
         # can't add metadata inplace
         final_output = apply_metadata(
-            source=str(fade_path),
-            output=str(final_output),
+            input_fname=str(fade_path),
+            output_fname=str(final_output),
             title=title,
             track=num,
             album_tags=metadata,
+            remove_original=True,
         )
 
         return str(final_output)
 
-    def _postprocess(self):
+    def _postprocess(self, video_path):
         if not self.slice_output:
             logger.info(f"Unsliced {self.title} saved to {self.output_dir}")
             return
@@ -383,20 +380,22 @@ class YTCompDL(Pytube_Dl):
         if not title_folder.exists():
             title_folder.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Processing file: {self.video_path}")
-        logger.info(f"Running post-processing in {self.n_processes} processes.")
+        post_process_msg = f"Running post-processing in {self.n_processes} processes."
+        logger.info(f"Processing file: {video_path}")
+        logger.info(post_process_msg)
         logger.info(f"Slicing: {self.slice_output}")
         logger.info(f"Applying fade ({self.fade_time}): {self.fade_end}")
 
+        print(post_process_msg)
         with mp.Pool(processes=self.n_processes) as pool:
             args = [
                 (
-                    self.video_path,
+                    video_path,
                     num,
                     title,
                     times,
                     title_folder,
-                    self.output,
+                    self.output_type,
                     self.fade_end,
                     self.fade_time,
                     self.metadata,
@@ -404,8 +403,11 @@ class YTCompDL(Pytube_Dl):
                 for num, (title, times) in enumerate(zip(self.titles, self.times), 1)
             ]
             res = pool.starmap(self._postprocess_track, args)
-            logger.info(f"Completed processing. {len(res)} files produced.")
-            return res
+
+        done_msg = f"Completed processing. {len(res)} files produced."
+        logger.info(done_msg)
+        print(done_msg)
+        return res
 
     def format_timestamps(self):
         """
@@ -447,8 +449,7 @@ class YTCompDL(Pytube_Dl):
             times.append([times[-1][1] + datetime.timedelta(seconds=1), self.duration])
         return titles, times
 
-    @staticmethod
-    def clean_timestamps(timestamps):
+    def clean_timestamps(self, timestamps) -> List[List[str]]:
         """
         Remove characters used to separate timestamp and title.
         :param timestamps:  timestamp/title strings (list of lists)
@@ -456,7 +457,7 @@ class YTCompDL(Pytube_Dl):
         """
         # pprint.pprint(timestamps)
         return [
-            [re.sub(r"\[|\]|—|-|~", "", item.strip()).strip() for item in timestamp]
+            [re.sub(self.YT_IGN_REGEX, "", item.strip()).strip() for item in timestamp]
             for timestamp in timestamps
         ]
 

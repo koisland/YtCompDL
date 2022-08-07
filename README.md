@@ -14,17 +14,12 @@ Store your API key in a `.env` file in the main working directory.
 
 ### Conda
 ``` shell
-conda env create -f env.yaml
+conda env create -f environment.yaml
 
 conda activate YTCompDL
 
-python main.py -u "https://www.youtube.com/watch?v=gIsHl7swEgk" -o "audio" -x "config_regex.yaml"
+python main.py -u "https://www.youtube.com/watch?v=gIsHl7swEgk" -o "audio" -x config/config_regex.yaml
 ```
-
-### Docker
-```shell
-```
----
 
 ## Options
 ---
@@ -103,5 +98,4 @@ For some examples, check these patterns below:
 
 * [ ] **Testing**
   * Add more unittests.
-* [ ] **Dockerfile**
-  * Write up a dockerfile to handle installation.
+* [ ] **PyPi** package.
