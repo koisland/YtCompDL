@@ -21,7 +21,6 @@ from .ffmpeg_utils import slice_source, apply_fade, apply_metadata
 from .errors import YTAPIError, PostProcessError, PyTubeError
 
 logger = logging.getLogger(__name__)
-dotenv.load_dotenv()
 
 
 class YTCompDL(Pytube_Dl):
@@ -48,6 +47,7 @@ class YTCompDL(Pytube_Dl):
 
     def __init__(
         self,
+        api_key_file: str,
         video_url: str,
         output_type: str,
         regex_config: str,
@@ -63,6 +63,7 @@ class YTCompDL(Pytube_Dl):
         rm_src: bool = False,
     ):
         """
+        :param api_key_file: Youtube API key as .env file. (string)
         :param video_url: Youtube video url. (string)
         :param output_type: Desired output from video. (string - "audio", "video")
         :param res: Desired resolution (if video_ouput="video"). (string)
@@ -98,7 +99,8 @@ class YTCompDL(Pytube_Dl):
         self.fade_time = fade_time
         self.rm_src = rm_src
 
-        if not os.environ.get("YT_API_KEY"):
+        api_key = dotenv.dotenv_values(api_key_file).get("YT_API_KEY")
+        if api_key is None:
             raise YTAPIError(
                 "No YouTube Data API key detected in environment variables."
             )
@@ -107,7 +109,7 @@ class YTCompDL(Pytube_Dl):
             self.YT = build(
                 serviceName="youtube",
                 version="v3",
-                developerKey=os.environ.get("YT_API_KEY"),
+                developerKey=api_key,
             )
         except Exception:
             traceback.print_exc(limit=2, file=sys.stdout)

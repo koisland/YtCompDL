@@ -1,3 +1,4 @@
+import os
 import argparse
 import pathlib
 from .yt_comp_dl import YTCompDL
@@ -9,6 +10,9 @@ def main() -> int:
     )
 
     # Required arguments.
+    ap.add_argument(
+        "-k", "--key", required=True, type=str, help="Youtube API key as .env file."
+    )
     ap.add_argument("-u", "--url", required=True, type=str, help="Youtube URL")
     ap.add_argument(
         "-o",
@@ -29,7 +33,7 @@ def main() -> int:
     ap.add_argument(
         "-d",
         "--directory",
-        default=pathlib.Path(__file__).parents[0].joinpath("output"),
+        default=pathlib.Path(os.getcwd()).joinpath("output"),
         type=str,
         help="Output directory.",
     )

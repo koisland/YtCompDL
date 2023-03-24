@@ -1,4 +1,7 @@
-# YTCompDL, a Youtube Video Segmenter
+# YTCompDL
+[![PyPI](https://img.shields.io/pypi/v/ytcompdl?color=orange)](https://pypi.org/project/ytcompdl/)
+[![Docker Image Version (tag latest semver)](https://img.shields.io/docker/v/koisland/ytcompdl/1.0.1?label=Docker)](https://hub.docker.com/r/koisland/ytcompdl)
+
 Command-line program to download and segment Youtube videos automatically.
 
 ![](docs/vid_chapters.png)
@@ -36,10 +39,10 @@ ytcompdl -h
 Arguments are passed after the image name.
 ```shell
 # Image wd set to /ytcompdl
-docker run --rm -v /$PWD:/ytcompdl ytcompdl:latest -h
+docker run --rm -v /$PWD:/ytcompdl koisland/ytcompdl:latest -h
 ```
 
-To build the image.
+To build the image locally.
 ```shell
 docker build . -t ytcompdl:latest
 ```
@@ -47,10 +50,11 @@ docker build . -t ytcompdl:latest
 ### Usage
 ```shell
 # Download audio of video.
-ytcompdl -u "https://www.youtube.com/watch?v=gIsHl7swEgk" -o "audio" -x config/config_regex.yaml
+ytcompdl -u "https://www.youtube.com/watch?v=gIsHl7swEgk" -k .env -o "audio" -x config/config_regex.yaml
 
 # Download split audio of video and save comment/desc used to timestamp.
 ytcompdl -u "https://www.youtube.com/watch?v=gIsHl7swEgk" \
+  -k .env \
   -o "audio" \
   -x config/config_regex.yaml \
   -t -s
@@ -139,5 +143,4 @@ ytcompdl -h
 ---
 
 * [ ] **Testing**
-  * Add more unittests.
-* [ ] **PyPi** package.
+  * Add unittests.
