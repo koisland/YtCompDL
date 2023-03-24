@@ -114,8 +114,8 @@ duration_timestamp: "(.*?)(?:{ignored_spacers})*({time})(?:{ignored_spacers})*({
 ```
 
 For some examples, check these patterns below:
-* `Start` Timestamps
-* `Duration` Timestamps
+* [`Start` Timestamps](https://regex101.com/r/M2UiL6/1)
+* [`Duration` Timestamps](https://regex101.com/r/nWeTrf/1)
 
 
 ## Workflow
