@@ -4,8 +4,8 @@ import pytube
 from typing import Dict
 from pytube.cli import on_progress
 
-from ytcompdl.ffmpeg_utils import merge_codecs, convert_audio
-from ytcompdl.errors import PyTubeError
+from .ffmpeg_utils import merge_codecs, convert_audio
+from .errors import PyTubeError
 
 logger = logging.getLogger(__name__)
 
@@ -58,9 +58,8 @@ class Pytube_Dl:
                     filename=filename,
                     filename_prefix=f"{categ}_",
                 )
-
             else:
-                print(f'Downloading audio of "{self.url}" as "audio_{output}".')
+                print(f'Downloading audio of "{self.url}" as "audio_{filename}".')
                 logger.info(f"Downloading {stream.title} as {stream.default_filename}.")
                 self.output_files["audio"] = stream.download(
                     output_path=output_dir, filename=filename, filename_prefix="audio_"

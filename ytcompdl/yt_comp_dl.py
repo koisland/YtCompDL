@@ -16,12 +16,11 @@ from functools import reduce
 from googleapiclient.discovery import build
 from pytube.helpers import safe_filename
 
-from ytcompdl.pytube_dl import Pytube_Dl
-from ytcompdl.ffmpeg_utils import slice_source, apply_fade, apply_metadata
-from ytcompdl.errors import YTAPIError, PostProcessError, PyTubeError
+from .pytube_dl import Pytube_Dl
+from .ffmpeg_utils import slice_source, apply_fade, apply_metadata
+from .errors import YTAPIError, PostProcessError, PyTubeError
 
 logger = logging.getLogger(__name__)
-dotenv.load_dotenv()
 
 
 class YTCompDL(Pytube_Dl):
@@ -48,6 +47,7 @@ class YTCompDL(Pytube_Dl):
 
     def __init__(
         self,
+        api_key_file: str,
         video_url: str,
         output_type: str,
         regex_config: str,
@@ -63,6 +63,7 @@ class YTCompDL(Pytube_Dl):
         rm_src: bool = False,
     ):
         """
+        :param api_key_file: Youtube API key as .env file. (string)
         :param video_url: Youtube video url. (string)
         :param output_type: Desired output from video. (string - "audio", "video")
         :param res: Desired resolution (if video_ouput="video"). (string)
@@ -98,7 +99,8 @@ class YTCompDL(Pytube_Dl):
         self.fade_time = fade_time
         self.rm_src = rm_src
 
-        if not os.environ.get("YT_API_KEY"):
+        api_key = dotenv.dotenv_values(api_key_file).get("YT_API_KEY")
+        if api_key is None:
             raise YTAPIError(
                 "No YouTube Data API key detected in environment variables."
             )
@@ -107,7 +109,7 @@ class YTCompDL(Pytube_Dl):
             self.YT = build(
                 serviceName="youtube",
                 version="v3",
-                developerKey=os.environ.get("YT_API_KEY"),
+                developerKey=api_key,
             )
         except Exception:
             traceback.print_exc(limit=2, file=sys.stdout)
@@ -274,7 +276,7 @@ class YTCompDL(Pytube_Dl):
             else:
                 raise YTAPIError("Invalid album metadata provided.")
 
-    def download(self) -> None:
+    def download(self) -> int:
         """
         Download YT video provided by url and process using timestamps.
         :return: None
@@ -304,6 +306,8 @@ class YTCompDL(Pytube_Dl):
                 os.remove(video_path)
             except FileNotFoundError:
                 pass
+
+        return 0
 
     @staticmethod
     def _postprocess_track(
@@ -418,7 +422,7 @@ class YTCompDL(Pytube_Dl):
         titles = []
         times = []
 
-        for timestamp in self.timestamps:
+        for timestamp in self.timestamps():
             times.append(self.convert_str_time(timestamp[1:-1], rtn_fmt="timedelta"))
             try:
                 # If empty group is at start. Timestamp title at end.
@@ -571,7 +575,6 @@ class YTCompDL(Pytube_Dl):
                 elif len(timestamps) == 2:
                     yield re.findall(self.YT_DUR_TIMESTAMPS_REGEX, line)
 
-    @property
     def timestamps(self):
         """
         Found timestamps will always be in this form: (str_title_front, *timestamp, str_title_back)
