@@ -22,6 +22,7 @@ Store your API key in a `.env` file in the main working directory.
 sudo apt install ffmpeg
 virtualenv venv
 source venv/bin/activate
+pip install -r envs/requirements.txt
 ytcompdl -h
 ```
 
