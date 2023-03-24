@@ -16,9 +16,9 @@ from functools import reduce
 from googleapiclient.discovery import build
 from pytube.helpers import safe_filename
 
-from ytcompdl.pytube_dl import Pytube_Dl
-from ytcompdl.ffmpeg_utils import slice_source, apply_fade, apply_metadata
-from ytcompdl.errors import YTAPIError, PostProcessError, PyTubeError
+from .pytube_dl import Pytube_Dl
+from .ffmpeg_utils import slice_source, apply_fade, apply_metadata
+from .errors import YTAPIError, PostProcessError, PyTubeError
 
 logger = logging.getLogger(__name__)
 dotenv.load_dotenv()
@@ -274,7 +274,7 @@ class YTCompDL(Pytube_Dl):
             else:
                 raise YTAPIError("Invalid album metadata provided.")
 
-    def download(self) -> None:
+    def download(self) -> int:
         """
         Download YT video provided by url and process using timestamps.
         :return: None
@@ -304,6 +304,8 @@ class YTCompDL(Pytube_Dl):
                 os.remove(video_path)
             except FileNotFoundError:
                 pass
+
+        return 0
 
     @staticmethod
     def _postprocess_track(
@@ -418,7 +420,7 @@ class YTCompDL(Pytube_Dl):
         titles = []
         times = []
 
-        for timestamp in self.timestamps:
+        for timestamp in self.timestamps():
             times.append(self.convert_str_time(timestamp[1:-1], rtn_fmt="timedelta"))
             try:
                 # If empty group is at start. Timestamp title at end.
@@ -571,7 +573,6 @@ class YTCompDL(Pytube_Dl):
                 elif len(timestamps) == 2:
                     yield re.findall(self.YT_DUR_TIMESTAMPS_REGEX, line)
 
-    @property
     def timestamps(self):
         """
         Found timestamps will always be in this form: (str_title_front, *timestamp, str_title_back)

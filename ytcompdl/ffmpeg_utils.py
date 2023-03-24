@@ -7,7 +7,8 @@ import functools
 import tqdm
 from ffmpeg import probe
 from typing import List, Dict, Tuple, Union, Callable
-from ytcompdl.errors import PostProcessError
+
+from .errors import PostProcessError
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,7 @@ def check_ffmpeg(func: Callable) -> Callable:
     @functools.wraps(func)
     def inner_func(*args, **kwargs):
         if shutil.which("ffmpeg") is None:
-            raise Exception("ffmpeg not an available executable.")
+            raise PostProcessError("ffmpeg not an available executable.")
         ret = func(*args, **kwargs)
         return ret
 

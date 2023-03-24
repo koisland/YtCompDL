@@ -1,9 +1,8 @@
 # YTCompDL, a Youtube Video Segmenter
 Command-line program to download and segment Youtube videos automatically.
 
-<img src="docs/vid_chapters.png" width="60%">
+![](docs/vid_chapters.png)
 
----
 ## Getting Started
 ---
 
@@ -12,13 +11,49 @@ Follow these [instructions](https://developers.google.com/youtube/v3/getting-sta
 
 Store your API key in a `.env` file in the main working directory.
 
-### Conda
-``` shell
-conda env create -f environment.yaml
+### Setup
 
-conda activate YTCompDL
+#### venv
+```shell
+# Make sure ffmpeg is installed.
+sudo apt install ffmpeg
+virtualenv venv
+source venv/bin/activate
+ytcompdl -h
+```
 
-python main.py -u "https://www.youtube.com/watch?v=gIsHl7swEgk" -o "audio" -x config/config_regex.yaml
+#### Conda
+```shell
+# Setup env.
+conda env create -f envs/env.yaml -n ytcompdl
+conda activate ytcompdl
+ytcompdl -h
+```
+
+#### Docker
+`ffmpeg` comes installed with the docker image.
+
+Arguments are passed after the image name.
+```shell
+# Image wd set to /ytcompdl
+docker run --rm -v /$PWD:/ytcompdl ytcompdl:latest -h
+```
+
+To build the image.
+```shell
+docker build . -t ytcompdl:latest
+```
+
+### Usage
+```shell
+# Download audio of video.
+ytcompdl -u "https://www.youtube.com/watch?v=gIsHl7swEgk" -o "audio" -x config/config_regex.yaml
+
+# Download split audio of video and save comment/desc used to timestamp.
+ytcompdl -u "https://www.youtube.com/watch?v=gIsHl7swEgk" \
+  -o "audio" \
+  -x config/config_regex.yaml \
+  -t -s
 ```
 
 ## Options
@@ -78,7 +113,7 @@ For some examples, check these patterns below:
 * `Duration` Timestamps
 
 
-### Workflow
+## Workflow
 ---
 
 * Query YouTube's Data API for selected video.
@@ -93,7 +128,14 @@ For some examples, check these patterns below:
 * Cleanup
     * Remove intermediate outputs.
 
-### TO-DO:
+## Build from Source
+```shell
+virtualenv venv && source venv/bin/activate
+python setup.py sdist bdist_wheel
+ytcompdl -h
+```
+
+## TO-DO:
 ---
 
 * [ ] **Testing**

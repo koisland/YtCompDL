@@ -1,9 +1,9 @@
 import argparse
 import pathlib
-from ytcompdl.yt_comp_dl import YTCompDL
+from .yt_comp_dl import YTCompDL
 
 
-if __name__ == "__main__":
+def main() -> int:
     ap = argparse.ArgumentParser(
         description="Command-line program to download and segment Youtube videos."
     )
@@ -79,4 +79,8 @@ if __name__ == "__main__":
 
     dl = YTCompDL(*args.values())
 
-    dl.download()
+    return dl.download()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
