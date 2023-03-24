@@ -1,6 +1,6 @@
 # YTCompDL
 [![PyPI](https://img.shields.io/pypi/v/ytcompdl?color=orange)](https://pypi.org/project/ytcompdl/)
-[![Docker Image Version (tag latest semver)](https://img.shields.io/docker/v/koisland/ytcompdl/1.0.1?label=Docker)](https://hub.docker.com/r/koisland/ytcompdl)
+[![Docker Image Version (tag latest semver)](https://img.shields.io/docker/v/koisland/ytcompdl/latest?label=Docker)](https://hub.docker.com/r/koisland/ytcompdl)
 
 Command-line program to download and segment Youtube videos automatically.
 
