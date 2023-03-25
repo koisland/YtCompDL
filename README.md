@@ -12,7 +12,7 @@ Command-line program to download and segment Youtube videos automatically.
 ### Getting a YouTube Data API Key
 Follow these [instructions](https://developers.google.com/youtube/v3/getting-started).
 
-Store your API key in a `.env` file in the main working directory.
+Store your API key as `YT_API_KEY` in a `.env` file.
 
 ### Setup
 
@@ -65,12 +65,13 @@ ytcompdl -u "https://www.youtube.com/watch?v=gIsHl7swEgk" \
 ---
 
 ```
-usage: main.py [-h] -u URL -o OUTPUT_TYPE -x REGEX_CFG [-d DIRECTORY] [-n N_CORES] [-r RESOLUTION] [-m METADATA] [-c] [-t] [-s] [-f FADE] [-ft FADE_TIME]
+usage: ytcompdl [-h] -k KEY -u URL -o OUTPUT_TYPE -x REGEX_CFG [-d DIRECTORY] [-n N_CORES] [-r RESOLUTION] [-m METADATA] [-c] [-t] [-s] [-f FADE] [-ft FADE_TIME] [-rm]
 
 Command-line program to download and segment Youtube videos.
 
-options:
+optional arguments:
   -h, --help            show this help message and exit
+  -k KEY, --key KEY     Youtube API key as .env file.
   -u URL, --url URL     Youtube URL
   -o OUTPUT_TYPE, --output_type OUTPUT_TYPE
                         Desired output (audio/video)
@@ -90,6 +91,7 @@ options:
   -f FADE, --fade FADE  Fade (in/out/both/none)
   -ft FADE_TIME, --fade_time FADE_TIME
                         Fade time in seconds.
+  -rm, --rm_src         Remove downloaded source file after processing.
 ```
 
 ### Regular Expressions
